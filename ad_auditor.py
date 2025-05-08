@@ -3,8 +3,11 @@ import mysql.connector
 from ldap3 import Server, Connection, ALL
 from datetime import date
 import smtplib
+from email.mime.multipart import MIMEMultipart
 from email.mime.text import MIMEText
 import traceback
+import uuid
+from collections import defaultdict
 
 # Load config
 config = configparser.ConfigParser()
@@ -19,14 +22,19 @@ GROUP_PREFIX = config['ldap']['group_prefix']
 EMAIL_MODE = config['email']['mode']
 FROM_ADDRESS = config['email']['from_address']
 
+REVIEW_URL = "https://audit.example.com/review?token="  # Placeholder link
+
 def log(msg):
     print(f"[+] {msg}")
 
-def send_email(to, subject, body):
-    msg = MIMEText(body)
+def send_email(to, subject, plain_text, html_content):
+    msg = MIMEMultipart("alternative")
     msg['Subject'] = subject
     msg['From'] = FROM_ADDRESS
     msg['To'] = to if isinstance(to, str) else ", ".join(to)
+
+    msg.attach(MIMEText(plain_text, "plain"))
+    msg.attach(MIMEText(html_content, "html"))
 
     try:
         if EMAIL_MODE == 'localhost':
@@ -50,7 +58,7 @@ def send_email(to, subject, body):
 
 def send_error_email(subject, message):
     recipients = [x.strip() for x in config['alerts']['error_recipients'].split(',')]
-    send_email(recipients, subject, message)
+    send_email(recipients, subject, message, message)
 
 def send_minor_error(subject, message):
     if config['alerts'].get('notify_on_minor_errors', 'no').lower() == 'yes':
@@ -94,7 +102,8 @@ try:
         id INT AUTO_INCREMENT PRIMARY KEY,
         username VARCHAR(255),
         manager_email VARCHAR(255),
-        audit_date DATE
+        audit_date DATE,
+        secret VARCHAR(64)
     )
     ''')
     db.commit()
@@ -102,8 +111,6 @@ try:
     log(f"Searching for groups starting with prefix: {GROUP_PREFIX}")
     conn.search(BASE_DN, f'(&(objectClass=group)(cn={GROUP_PREFIX}*))', attributes=['member', 'cn'])
     log(f"Found {len(conn.entries)} groups.")
-
-    users_seen = set()
 
     for group in conn.entries:
         group_name = str(group.cn)
@@ -143,48 +150,73 @@ try:
                 log("    [!] Manager DN is missing or invalid.")
 
             if username:
-                users_seen.add(username)
-                log("    [DB] Inserting/Updating user record...")
                 cursor.execute('REPLACE INTO users (username, email, manager_email, last_audited) VALUES (%s, %s, %s, %s)',
                                (username, email, manager_email, None))
-                log(f"    [DB] Adding group membership: {username} -> {group_name}")
                 cursor.execute('INSERT IGNORE INTO user_groups (username, group_name) VALUES (%s, %s)', (username, group_name))
 
     db.commit()
     log("\n[✓] User and group import completed.\n")
 
-    log("Selecting up to 5 users who haven't been recently audited...")
+    log("Finding pending users to audit...")
     cursor.execute('''
-    SELECT username, email, manager_email FROM users
-    WHERE manager_email IS NOT NULL
-    ORDER BY last_audited IS NOT NULL, last_audited ASC
-    LIMIT 5
+    SELECT u.username, u.email, u.manager_email
+    FROM users u
+    WHERE u.manager_email IS NOT NULL
+    ORDER BY u.last_audited IS NOT NULL, u.last_audited ASC
     ''')
-    users_to_audit = cursor.fetchall()
-    log(f"Will send audit emails for {len(users_to_audit)} users.")
+    rows = cursor.fetchall()
 
-    for username, email, manager_email in users_to_audit:
-        log(f"\n[Audit] Preparing audit for {username} ({email})")
+    # Group audits by manager, limit to 5 per manager
+    manager_batches = defaultdict(list)
+    for username, email, manager_email in rows:
+        if len(manager_batches[manager_email]) < 5:
+            manager_batches[manager_email].append((username, email))
 
-        cursor.execute('SELECT group_name FROM user_groups WHERE username = %s', (username,))
-        groups = [row[0] for row in cursor.fetchall()]
-        log(f"  [Groups] {', '.join(groups) if groups else 'No groups found.'}")
+    for manager_email, users in manager_batches.items():
+        log(f"\n[Manager Audit Batch] {manager_email} -> {len(users)} users")
+        for username, email in users:
+            cursor.execute('SELECT group_name FROM user_groups WHERE username = %s', (username,))
+            groups = [row[0] for row in cursor.fetchall()]
+            group_list = ''.join(f"<li>{g}</li>" for g in groups)
+            plain_groups = '\n'.join(groups)
 
-        body = f"""This is an access audit.
+            secret = uuid.uuid4().hex
+            review_link = f"{REVIEW_URL}{secret}"
+
+            plain_text = f"""Access Review Required
 
 User: {username}
 Email: {email}
-Current Groups:
-{chr(10).join(groups)}
+Groups:
+{plain_groups}
 
-Please confirm if this access is still valid.
-"""
-        send_email(manager_email, f"Access Review: {username}", body)
+Please confirm if this access is still valid:
+{review_link}
 
-        log("  [DB] Logging audit action and updating last_audited...")
-        cursor.execute('UPDATE users SET last_audited = %s WHERE username = %s', (date.today(), username))
-        cursor.execute('INSERT INTO audit_log (username, manager_email, audit_date) VALUES (%s, %s, %s)',
-                       (username, manager_email, date.today()))
+This is an automated message generated by the TechOps Team."""
+
+            html_content = f"""
+            <html>
+            <body>
+                <p><strong>Access Review Required</strong></p>
+                <p><strong>User:</strong> {username}<br>
+                   <strong>Email:</strong> {email}</p>
+                <p><strong>Groups:</strong></p>
+                <ul>{group_list}</ul>
+                <p>
+                    <a href="{review_link}" style="background-color:#1a73e8;color:#fff;padding:10px 20px;
+                    text-decoration:none;border-radius:4px;">Review Access</a>
+                </p>
+                <p style="font-size: small; color: #777;">This is an automated message generated by the TechOps Team.</p>
+            </body>
+            </html>
+            """
+
+            send_email(manager_email, f"Access Review: {username}", plain_text, html_content)
+
+            cursor.execute('UPDATE users SET last_audited = %s WHERE username = %s', (date.today(), username))
+            cursor.execute('INSERT INTO audit_log (username, manager_email, audit_date, secret) VALUES (%s, %s, %s, %s)',
+                           (username, manager_email, date.today(), secret))
 
     db.commit()
     cursor.close()
