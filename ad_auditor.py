@@ -21,8 +21,9 @@ GROUP_PREFIX = config['ldap']['group_prefix']
 
 EMAIL_MODE = config['email']['mode']
 FROM_ADDRESS = config['email']['from_address']
+REVIEW_URL = "https://audit.example.com/review?token="
 
-REVIEW_URL = "https://audit.example.com/review?token="  # Placeholder link
+MIN_DAYS = int(config['audit'].get('min_days_between_audits', 30))
 
 def log(msg):
     print(f"[+] {msg}")
@@ -150,23 +151,35 @@ try:
                 log("    [!] Manager DN is missing or invalid.")
 
             if username:
-                cursor.execute('REPLACE INTO users (username, email, manager_email, last_audited) VALUES (%s, %s, %s, %s)',
-                               (username, email, manager_email, None))
+                cursor.execute('SELECT last_audited FROM users WHERE username = %s', (username,))
+                row = cursor.fetchone()
+                last_audited = row[0] if row else None
+
+                if row:
+                    cursor.execute('UPDATE users SET email = %s, manager_email = %s WHERE username = %s',
+                                   (email, manager_email, username))
+                else:
+                    cursor.execute('INSERT INTO users (username, email, manager_email, last_audited) VALUES (%s, %s, %s, %s)',
+                                   (username, email, manager_email, last_audited))
+
                 cursor.execute('INSERT IGNORE INTO user_groups (username, group_name) VALUES (%s, %s)', (username, group_name))
 
     db.commit()
     log("\n[✓] User and group import completed.\n")
 
-    log("Finding pending users to audit...")
-    cursor.execute('''
+    log(f"Finding users who haven't been audited in the last {MIN_DAYS} days...")
+    cursor.execute(f'''
     SELECT u.username, u.email, u.manager_email
     FROM users u
     WHERE u.manager_email IS NOT NULL
+    AND (
+        u.last_audited IS NULL
+        OR DATEDIFF(CURDATE(), u.last_audited) >= %s
+    )
     ORDER BY u.last_audited IS NOT NULL, u.last_audited ASC
-    ''')
+    ''', (MIN_DAYS,))
     rows = cursor.fetchall()
 
-    # Group audits by manager, limit to 5 per manager
     manager_batches = defaultdict(list)
     for username, email, manager_email in rows:
         if len(manager_batches[manager_email]) < 5:
