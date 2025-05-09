@@ -32,7 +32,7 @@ config = configparser.ConfigParser()
 config.read('config.ini')
 
 def get_secret(secret_name, region_name=None):
-    try:
+    try:                                                                                            
         session = boto3.session.Session()
         region = region_name or session.region_name or config.get('aws', 'region', fallback=None)
         if not region:
