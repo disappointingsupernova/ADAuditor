@@ -32,7 +32,7 @@ config = configparser.ConfigParser()
 config.read('config.ini')
 
 def get_secret(secret_name, region_name=None):
-    try:                                                                                            
+    try:
         session = boto3.session.Session()
         region = region_name or session.region_name or config.get('aws', 'region', fallback=None)
         if not region:
@@ -88,6 +88,7 @@ emails_skipped = 0
 audits_logged = 0
 dry_run_emails = []
 manager_email_counts = defaultdict(int)
+user_current_groups = defaultdict(set)
 
 def log(msg):
     print(f"[+] {msg}")
@@ -140,68 +141,54 @@ def send_minor_error(subject, message):
 
 def list_managers_only():
     conn = ldap_connection()
-
     print(f"[+] Searching for groups starting with prefix: {GROUP_PREFIX}")
     conn.search(BASE_DN, f'(&(objectClass=group)(cn={GROUP_PREFIX}*))', attributes=['member', 'cn'])
     print(f"[+] Found {len(conn.entries)} groups.")
 
     unique_managers = set()
-
     for group in conn.entries:
         members = group.member.values if 'member' in group else []
-
         for member_dn in members:
             conn.search(member_dn, '(objectClass=person)', attributes=['manager'])
             if not conn.entries:
                 continue
-
             user = conn.entries[0]
             manager_dn = str(user.manager) if 'manager' in user else None
-
             if manager_dn:
                 conn.search(manager_dn, '(objectClass=person)', attributes=['mail'])
                 if conn.entries:
                     manager_email = str(conn.entries[0].mail)
                     if manager_email:
                         unique_managers.add(manager_email)
-
     print("\n=== Unique Manager Emails ===")
     for email in sorted(unique_managers):
         print(email)
-
     conn.unbind()
 
 def list_manager_user_counts():
     conn = ldap_connection()
-
     print(f"[+] Searching for groups starting with prefix: {GROUP_PREFIX}")
     conn.search(BASE_DN, f'(&(objectClass=group)(cn={GROUP_PREFIX}*))', attributes=['member', 'cn'])
 
     manager_user_counts = defaultdict(set)
-
     for group in conn.entries:
         members = group.member.values if 'member' in group else []
-
         for member_dn in members:
             conn.search(member_dn, '(objectClass=person)', attributes=['manager', 'sAMAccountName'])
             if not conn.entries:
                 continue
-
             user = conn.entries[0]
             manager_dn = str(user.manager) if 'manager' in user else None
             username = str(user.sAMAccountName) if 'sAMAccountName' in user else None
-
             if manager_dn and username:
                 conn.search(manager_dn, '(objectClass=person)', attributes=['mail'])
                 if conn.entries:
                     manager_email = str(conn.entries[0].mail)
                     if manager_email:
                         manager_user_counts[manager_email].add(username)
-
     print("\n=== Manager Emails and Managed Users Count ===")
     for email, users in sorted(manager_user_counts.items()):
         print(f"{email:<40} | {len(users)} users")
-
     conn.unbind()
 
 if list_managers_mode:
@@ -214,15 +201,15 @@ if list_manager_counts_mode:
 
 try:
     conn = ldap_connection()
-    
+
     log("Connecting to MySQL database...")
     mysql_secret_key = config['mysql'].get('secret_name', fallback=None)
     mysql_has_plain = all(k in config['mysql'] for k in ('host', 'port', 'user', 'password', 'database'))
     if mysql_secret_key and mysql_has_plain:
         print("[!] Both MySQL secret_name and plaintext credentials are configured. Please remove one.")
         sys.exit(1)
-    if 'mysql' in config and 'secret_name' in config['mysql']:
-        db_secret = get_secret(config['mysql']['secret_name'])
+    if mysql_secret_key:
+        db_secret = get_secret(mysql_secret_key)
         db = mysql.connector.connect(
             host=db_secret['host'],
             port=int(db_secret['port']),
@@ -242,29 +229,29 @@ try:
 
     log("Ensuring tables exist...")
     cursor.execute('''
-    CREATE TABLE IF NOT EXISTS users (
-        username VARCHAR(255) PRIMARY KEY,
-        email VARCHAR(255),
-        manager_email VARCHAR(255),
-        last_audited DATE
-    )
+        CREATE TABLE IF NOT EXISTS users (
+            username VARCHAR(255) PRIMARY KEY,
+            email VARCHAR(255),
+            manager_email VARCHAR(255),
+            last_audited DATE
+        )
     ''')
     cursor.execute('''
-    CREATE TABLE IF NOT EXISTS user_groups (
-        id INT AUTO_INCREMENT PRIMARY KEY,
-        username VARCHAR(255),
-        group_name VARCHAR(255),
-        UNIQUE KEY unique_user_group (username, group_name)
-    )
+        CREATE TABLE IF NOT EXISTS user_groups (
+            id INT AUTO_INCREMENT PRIMARY KEY,
+            username VARCHAR(255),
+            group_name VARCHAR(255),
+            UNIQUE KEY unique_user_group (username, group_name)
+        )
     ''')
     cursor.execute('''
-    CREATE TABLE IF NOT EXISTS audit_log (
-        id INT AUTO_INCREMENT PRIMARY KEY,
-        username VARCHAR(255),
-        manager_email VARCHAR(255),
-        audit_date DATE,
-        secret VARCHAR(64)
-    )
+        CREATE TABLE IF NOT EXISTS audit_log (
+            id INT AUTO_INCREMENT PRIMARY KEY,
+            username VARCHAR(255),
+            manager_email VARCHAR(255),
+            audit_date DATE,
+            secret VARCHAR(64)
+        )
     ''')
     db.commit()
 
@@ -283,7 +270,6 @@ try:
         for member_dn in members:
             log(f"  [User DN] {member_dn}")
             conn.search(member_dn, '(objectClass=person)', attributes=['sAMAccountName', 'mail', 'manager', 'givenName', 'sn'])
-
             if not conn.entries:
                 log(f"    [-] Failed to fetch user at: {member_dn}")
                 continue
@@ -334,18 +320,32 @@ try:
                 log(f"    [DRY-RUN] Inserted group: {username} -> {group_name}")
             group_memberships += 1
 
+            user_current_groups[username].add(group_name)
+
     log("\n[✓] User and group import completed.\n")
+
+    log("\n[✓] Checking for stale group mappings...")
+    for username, current_groups in user_current_groups.items():
+        cursor.execute('SELECT group_name FROM user_groups WHERE username = %s', (username,))
+        db_groups = set(row[0] for row in cursor.fetchall())
+        stale_groups = db_groups - current_groups
+        for stale_group in stale_groups:
+            if dry_run:
+                log(f"    [DRY-RUN] Would remove group: {username} -> {stale_group}")
+            else:
+                cursor.execute('DELETE FROM user_groups WHERE username = %s AND group_name = %s', (username, stale_group))
+                log(f"    [-] Removed stale group: {username} -> {stale_group}")
 
     log(f"Finding users who haven't been audited in the last {MIN_DAYS} days...")
     cursor.execute('''
-    SELECT u.username, u.email, u.manager_email
-    FROM users u
-    WHERE u.manager_email IS NOT NULL
-    AND (
-        u.last_audited IS NULL
-        OR DATEDIFF(CURDATE(), u.last_audited) >= %s
-    )
-    ORDER BY u.last_audited IS NOT NULL, u.last_audited ASC
+        SELECT u.username, u.email, u.manager_email
+        FROM users u
+        WHERE u.manager_email IS NOT NULL
+        AND (
+            u.last_audited IS NULL
+            OR DATEDIFF(CURDATE(), u.last_audited) >= %s
+        )
+        ORDER BY u.last_audited IS NOT NULL, u.last_audited ASC
     ''', (MIN_DAYS,))
     rows = cursor.fetchall()
 
@@ -430,7 +430,7 @@ This is an automated message generated by the TechOps Team."""
     print(f"Groups matched:      {group_count}")
     print(f"Users processed:     {user_count}")
     print(f"Group mappings:      {group_memberships}")
-    print(f"Managers contacted:  {len(managers_contacted)}")
+    print(f"Managers contacted:  {len(manager_email_counts)}")
     print(f"Audit emails sent:   {emails_sent}")
     print(f"Audit emails skipped (dry-run): {emails_skipped}")
     print(f"Audit entries added: {audits_logged}")
