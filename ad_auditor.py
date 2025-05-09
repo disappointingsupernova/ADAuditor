@@ -30,12 +30,16 @@ config = configparser.ConfigParser()
 config.read('config.ini')
 
 LDAP_SERVER = config['ldap']['server']
-LDAP_PORT = config['ldap'].getint('port', 636)
 SKIP_CERT_VALIDATION = config['ldap'].getboolean('skip_cert_validation', fallback=False)
 BIND_USER = config['ldap']['bind_user']
 BIND_PASS = config['ldap']['bind_password']
 BASE_DN = config['ldap']['base_dn']
 GROUP_PREFIX = config['ldap']['group_prefix']
+
+# Determine SSL usage and default port
+use_ssl = LDAP_SERVER.lower().startswith("ldaps")
+default_port = 636 if use_ssl else 389
+LDAP_PORT = config['ldap'].getint('port', fallback=default_port)
 
 EMAIL_MODE = config['email']['mode']
 FROM_ADDRESS = config['email']['from_address']
@@ -57,6 +61,16 @@ manager_email_counts = defaultdict(int)
 
 def log(msg):
     print(f"[+] {msg}")
+
+def ldap_connection():
+    log("Connecting to LDAP server...")
+    log(f"    Protocol: {'LDAPS' if use_ssl else 'LDAP'}")
+    log(f"    Certificate Validation: {'Skipped' if SKIP_CERT_VALIDATION else 'Enforced'}")
+    tls_config = Tls(validate=ssl.CERT_NONE if SKIP_CERT_VALIDATION else ssl.CERT_REQUIRED)
+    server = Server(LDAP_SERVER, port=LDAP_PORT, use_ssl=use_ssl, get_info=ALL, tls=tls_config)
+    conn = Connection(server, BIND_USER, BIND_PASS, auto_bind=True)
+    log("LDAP bind successful.")
+    return conn
 
 def send_email(to, subject, plain_text, html_content):
     msg = MIMEMultipart("alternative")
@@ -95,14 +109,7 @@ def send_minor_error(subject, message):
         send_error_email(subject, message)
 
 def list_managers_only():
-    use_ssl = LDAP_SERVER.lower().startswith("ldaps")
-    print("[+] Connecting to LDAP server...")
-    print(f"    Protocol: {'LDAPS' if use_ssl else 'LDAP'}")
-    print(f"    Certificate Validation: {'Skipped' if SKIP_CERT_VALIDATION else 'Enforced'}")
-    tls_config = Tls(validate=ssl.CERT_NONE if SKIP_CERT_VALIDATION else ssl.CERT_REQUIRED)
-    server = Server(LDAP_SERVER, port=LDAP_PORT, use_ssl=use_ssl, get_info=ALL, tls=tls_config)
-    conn = Connection(server, BIND_USER, BIND_PASS, auto_bind=True)
-    print("[+] LDAP bind successful.")
+    conn = ldap_connection()
 
     print(f"[+] Searching for groups starting with prefix: {GROUP_PREFIX}")
     conn.search(BASE_DN, f'(&(objectClass=group)(cn={GROUP_PREFIX}*))', attributes=['member', 'cn'])
@@ -135,14 +142,7 @@ def list_managers_only():
     conn.unbind()
 
 def list_manager_user_counts():
-    use_ssl = LDAP_SERVER.lower().startswith("ldaps")
-    print("[+] Connecting to LDAP server...")
-    print(f"    Protocol: {'LDAPS' if use_ssl else 'LDAP'}")
-    print(f"    Certificate Validation: {'Skipped' if SKIP_CERT_VALIDATION else 'Enforced'}")
-    tls_config = Tls(validate=ssl.CERT_NONE if SKIP_CERT_VALIDATION else ssl.CERT_REQUIRED)
-    server = Server(LDAP_SERVER, port=LDAP_PORT, use_ssl=use_ssl, get_info=ALL, tls=tls_config)
-    conn = Connection(server, BIND_USER, BIND_PASS, auto_bind=True)
-    print("[+] LDAP bind successful.")
+    conn = ldap_connection()
 
     print(f"[+] Searching for groups starting with prefix: {GROUP_PREFIX}")
     conn.search(BASE_DN, f'(&(objectClass=group)(cn={GROUP_PREFIX}*))', attributes=['member', 'cn'])
@@ -183,15 +183,8 @@ if list_manager_counts_mode:
     sys.exit(0)
 
 try:
-    use_ssl = LDAP_SERVER.lower().startswith("ldaps")
-    log("Connecting to LDAP server...")
-    log(f"Protocol: {'LDAPS' if use_ssl else 'LDAP'}")
-    log(f"Certificate Validation: {'Skipped' if SKIP_CERT_VALIDATION else 'Enforced'}")
-    tls_config = Tls(validate=ssl.CERT_NONE if SKIP_CERT_VALIDATION else ssl.CERT_REQUIRED)
-    server = Server(LDAP_SERVER, port=LDAP_PORT, use_ssl=use_ssl, get_info=ALL, tls=tls_config)
-    conn = Connection(server, BIND_USER, BIND_PASS, auto_bind=True)
-    log("LDAP bind successful.")
-
+    conn = ldap_connection()
+    
     log("Connecting to MySQL database...")
     db = mysql.connector.connect(
         host=config['mysql']['host'],
