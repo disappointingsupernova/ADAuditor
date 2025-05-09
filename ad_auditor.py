@@ -90,8 +90,10 @@ def send_minor_error(subject, message):
         send_error_email(subject, message)
 
 def list_managers_only():
-    print("[+] Connecting to LDAP server...")
     use_ssl = LDAP_SERVER.lower().startswith("ldaps")
+    print("[+] Connecting to LDAP server...")
+    print(f"    Protocol: {'LDAPS' if use_ssl else 'LDAP'}")
+    print(f"    Certificate Validation: {'Skipped' if SKIP_CERT_VALIDATION else 'Enforced'}")
     tls_config = Tls(validate=ssl.CERT_NONE if SKIP_CERT_VALIDATION else ssl.CERT_REQUIRED)
     server = Server(LDAP_SERVER, port=LDAP_PORT, use_ssl=use_ssl, get_info=ALL, tls=tls_config)
     conn = Connection(server, BIND_USER, BIND_PASS, auto_bind=True)
@@ -132,8 +134,10 @@ if list_managers_mode:
     sys.exit(0)
 
 try:
-    log("Connecting to LDAP server...")
     use_ssl = LDAP_SERVER.lower().startswith("ldaps")
+    log("Connecting to LDAP server...")
+    log(f"Protocol: {'LDAPS' if use_ssl else 'LDAP'}")
+    log(f"Certificate Validation: {'Skipped' if SKIP_CERT_VALIDATION else 'Enforced'}")
     tls_config = Tls(validate=ssl.CERT_NONE if SKIP_CERT_VALIDATION else ssl.CERT_REQUIRED)
     server = Server(LDAP_SERVER, port=LDAP_PORT, use_ssl=use_ssl, get_info=ALL, tls=tls_config)
     conn = Connection(server, BIND_USER, BIND_PASS, auto_bind=True)
