@@ -17,10 +17,12 @@ import ssl
 parser = argparse.ArgumentParser()
 parser.add_argument('--dry-run', action='store_true', help='Preview actions without making changes')
 parser.add_argument('--list-managers', action='store_true', help='List unique managers from AD and exit')
+parser.add_argument('--list-manager-counts', action='store_true', help='List manager emails and number of users they manage')
 parser.add_argument('--send-all-audit-emails', action='store_true', help='Ignore max emails per manager limit')
 args = parser.parse_args()
 dry_run = args.dry_run
 list_managers_mode = args.list_managers
+list_manager_counts_mode = args.list_manager_counts
 send_all = args.send_all_audit_emails
 
 # Load config
@@ -132,8 +134,52 @@ def list_managers_only():
 
     conn.unbind()
 
+def list_manager_user_counts():
+    use_ssl = LDAP_SERVER.lower().startswith("ldaps")
+    print("[+] Connecting to LDAP server...")
+    print(f"    Protocol: {'LDAPS' if use_ssl else 'LDAP'}")
+    print(f"    Certificate Validation: {'Skipped' if SKIP_CERT_VALIDATION else 'Enforced'}")
+    tls_config = Tls(validate=ssl.CERT_NONE if SKIP_CERT_VALIDATION else ssl.CERT_REQUIRED)
+    server = Server(LDAP_SERVER, port=LDAP_PORT, use_ssl=use_ssl, get_info=ALL, tls=tls_config)
+    conn = Connection(server, BIND_USER, BIND_PASS, auto_bind=True)
+    print("[+] LDAP bind successful.")
+
+    print(f"[+] Searching for groups starting with prefix: {GROUP_PREFIX}")
+    conn.search(BASE_DN, f'(&(objectClass=group)(cn={GROUP_PREFIX}*))', attributes=['member', 'cn'])
+
+    manager_user_counts = defaultdict(set)
+
+    for group in conn.entries:
+        members = group.member.values if 'member' in group else []
+
+        for member_dn in members:
+            conn.search(member_dn, '(objectClass=person)', attributes=['manager', 'sAMAccountName'])
+            if not conn.entries:
+                continue
+
+            user = conn.entries[0]
+            manager_dn = str(user.manager) if 'manager' in user else None
+            username = str(user.sAMAccountName) if 'sAMAccountName' in user else None
+
+            if manager_dn and username:
+                conn.search(manager_dn, '(objectClass=person)', attributes=['mail'])
+                if conn.entries:
+                    manager_email = str(conn.entries[0].mail)
+                    if manager_email:
+                        manager_user_counts[manager_email].add(username)
+
+    print("\n=== Manager Emails and Managed Users Count ===")
+    for email, users in sorted(manager_user_counts.items()):
+        print(f"{email:<40} | {len(users)} users")
+
+    conn.unbind()
+
 if list_managers_mode:
     list_managers_only()
+    sys.exit(0)
+
+if list_manager_counts_mode:
+    list_manager_user_counts()
     sys.exit(0)
 
 try:
