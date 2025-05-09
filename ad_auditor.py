@@ -12,6 +12,8 @@ from collections import defaultdict
 import argparse
 import sys
 import ssl
+import boto3
+import json
 
 # Parse arguments
 parser = argparse.ArgumentParser()
@@ -29,12 +31,40 @@ send_all = args.send_all_audit_emails
 config = configparser.ConfigParser()
 config.read('config.ini')
 
-LDAP_SERVER = config['ldap']['server']
-SKIP_CERT_VALIDATION = config['ldap'].getboolean('skip_cert_validation', fallback=False)
-BIND_USER = config['ldap']['bind_user']
-BIND_PASS = config['ldap']['bind_password']
-BASE_DN = config['ldap']['base_dn']
-GROUP_PREFIX = config['ldap']['group_prefix']
+def get_secret(secret_name, region_name=None):
+    try:
+        session = boto3.session.Session()
+        region = region_name or session.region_name or config.get('aws', 'region', fallback=None)
+        if not region:
+            raise Exception("You must specify a region for AWS Secrets Manager.")
+        client = session.client(service_name='secretsmanager', region_name=region)
+        response = client.get_secret_value(SecretId=secret_name)
+        return json.loads(response['SecretString'])
+    except Exception as e:
+        print(f"[!] Failed to retrieve secret {secret_name}: {e}")
+        sys.exit(1)
+
+# LDAP configuration
+ldap_secret_key = config['ldap'].get('secret_name', fallback=None)
+ldap_has_plain = all(k in config['ldap'] for k in ('server', 'bind_user', 'bind_password', 'base_dn', 'group_prefix'))
+if ldap_secret_key and ldap_has_plain:
+    print("[!] Both LDAP secret_name and plaintext credentials are configured. Please remove one.")
+    sys.exit(1)
+if ldap_secret_key:
+    ldap_secret = get_secret(ldap_secret_key)
+    LDAP_SERVER = ldap_secret['server']
+    BIND_USER = ldap_secret['bind_user']
+    BIND_PASS = ldap_secret['bind_password']
+    BASE_DN = ldap_secret['base_dn']
+    GROUP_PREFIX = ldap_secret['group_prefix']
+    SKIP_CERT_VALIDATION = ldap_secret.get('skip_cert_validation', 'false').lower() == 'true'
+else:
+    LDAP_SERVER = config['ldap']['server']
+    BIND_USER = config['ldap']['bind_user']
+    BIND_PASS = config['ldap']['bind_password']
+    BASE_DN = config['ldap']['base_dn']
+    GROUP_PREFIX = config['ldap']['group_prefix']
+    SKIP_CERT_VALIDATION = config['ldap'].getboolean('skip_cert_validation', fallback=False)
 
 # Determine SSL usage and default port
 use_ssl = LDAP_SERVER.lower().startswith("ldaps")
@@ -186,13 +216,28 @@ try:
     conn = ldap_connection()
     
     log("Connecting to MySQL database...")
-    db = mysql.connector.connect(
-        host=config['mysql']['host'],
-        port=config.getint('mysql', 'port'),
-        user=config['mysql']['user'],
-        password=config['mysql']['password'],
-        database=config['mysql']['database']
-    )
+    mysql_secret_key = config['mysql'].get('secret_name', fallback=None)
+    mysql_has_plain = all(k in config['mysql'] for k in ('host', 'port', 'user', 'password', 'database'))
+    if mysql_secret_key and mysql_has_plain:
+        print("[!] Both MySQL secret_name and plaintext credentials are configured. Please remove one.")
+        sys.exit(1)
+    if 'mysql' in config and 'secret_name' in config['mysql']:
+        db_secret = get_secret(config['mysql']['secret_name'])
+        db = mysql.connector.connect(
+            host=db_secret['host'],
+            port=int(db_secret['port']),
+            user=db_secret['user'],
+            password=db_secret['password'],
+            database=db_secret['database']
+        )
+    else:
+        db = mysql.connector.connect(
+            host=config['mysql']['host'],
+            port=config.getint('mysql', 'port'),
+            user=config['mysql']['user'],
+            password=config['mysql']['password'],
+            database=config['mysql']['database']
+        )
     cursor = db.cursor()
 
     log("Ensuring tables exist...")
