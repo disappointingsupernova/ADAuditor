@@ -1,6 +1,7 @@
+#!/usr/bin/env python3
 import configparser
 import mysql.connector
-from ldap3 import Server, Connection, ALL
+from ldap3 import Server, Connection, ALL, Tls
 from datetime import date
 import smtplib
 from email.mime.multipart import MIMEMultipart
@@ -10,6 +11,7 @@ import uuid
 from collections import defaultdict
 import argparse
 import sys
+import ssl
 
 # Parse arguments
 parser = argparse.ArgumentParser()
@@ -24,6 +26,8 @@ config = configparser.ConfigParser()
 config.read('config.ini')
 
 LDAP_SERVER = config['ldap']['server']
+LDAP_PORT = config['ldap'].getint('port', 636)
+SKIP_CERT_VALIDATION = config['ldap'].getboolean('skip_cert_validation', fallback=False)
 BIND_USER = config['ldap']['bind_user']
 BIND_PASS = config['ldap']['bind_password']
 BASE_DN = config['ldap']['base_dn']
@@ -87,7 +91,9 @@ def send_minor_error(subject, message):
 
 def list_managers_only():
     print("[+] Connecting to LDAP server...")
-    server = Server(LDAP_SERVER, get_info=ALL)
+    use_ssl = LDAP_SERVER.lower().startswith("ldaps")
+    tls_config = Tls(validate=ssl.CERT_NONE if SKIP_CERT_VALIDATION else ssl.CERT_REQUIRED)
+    server = Server(LDAP_SERVER, port=LDAP_PORT, use_ssl=use_ssl, get_info=ALL, tls=tls_config)
     conn = Connection(server, BIND_USER, BIND_PASS, auto_bind=True)
     print("[+] LDAP bind successful.")
 
@@ -127,7 +133,9 @@ if list_managers_mode:
 
 try:
     log("Connecting to LDAP server...")
-    server = Server(LDAP_SERVER, get_info=ALL)
+    use_ssl = LDAP_SERVER.lower().startswith("ldaps")
+    tls_config = Tls(validate=ssl.CERT_NONE if SKIP_CERT_VALIDATION else ssl.CERT_REQUIRED)
+    server = Server(LDAP_SERVER, port=LDAP_PORT, use_ssl=use_ssl, get_info=ALL, tls=tls_config)
     conn = Connection(server, BIND_USER, BIND_PASS, auto_bind=True)
     log("LDAP bind successful.")
 
