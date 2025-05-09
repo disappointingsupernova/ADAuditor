@@ -17,9 +17,11 @@ import ssl
 parser = argparse.ArgumentParser()
 parser.add_argument('--dry-run', action='store_true', help='Preview actions without making changes')
 parser.add_argument('--list-managers', action='store_true', help='List unique managers from AD and exit')
+parser.add_argument('--send-all-audit-emails', action='store_true', help='Ignore max emails per manager limit')
 args = parser.parse_args()
 dry_run = args.dry_run
 list_managers_mode = args.list_managers
+send_all = args.send_all_audit_emails
 
 # Load config
 config = configparser.ConfigParser()
@@ -38,6 +40,7 @@ FROM_ADDRESS = config['email']['from_address']
 REVIEW_URL = "https://audit.example.com/review?token="
 
 MIN_DAYS = int(config['audit'].get('min_days_between_audits', 30))
+MAX_EMAILS_PER_MANAGER = config['audit'].getint('max_audits_per_manager_per_day', fallback=5)
 
 # Stats tracking
 group_count = 0
@@ -267,9 +270,14 @@ try:
         if len(manager_batches[manager_email]) < 5:
             manager_batches[manager_email].append((username, email))
 
+    today = date.today()
     for manager_email, users in manager_batches.items():
-        managers_contacted.add(manager_email)
-        log(f"\n[Manager Audit Batch] {manager_email} -> {len(users)} users")
+        cursor.execute('SELECT COUNT(*) FROM audit_log WHERE manager_email = %s AND audit_date = %s', (manager_email, today))
+        count_today = cursor.fetchone()[0]
+
+        if not send_all and count_today >= MAX_EMAILS_PER_MANAGER:
+            log(f"[SKIPPED] {manager_email} has already received {count_today} audit emails today (limit: {MAX_EMAILS_PER_MANAGER})")
+            continue
 
         for username, email in users:
             display_name = user_display_names.get(username, username)
