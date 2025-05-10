@@ -354,9 +354,12 @@ try:
 
     log("\n[✓] Checking for stale group mappings...")
     for username, current_groups in user_current_groups.items():
+        # Only consider existing user_group mappings that match the currently scanned prefixes
+        prefix_filters = tuple(p.lower() for p in GROUP_PREFIXES)
         cursor.execute('SELECT group_name FROM user_groups WHERE username = %s', (username,))
         db_groups = set(row[0] for row in cursor.fetchall())
-        stale_groups = db_groups - current_groups
+        db_groups_filtered = {g for g in db_groups if any(g.lower().startswith(p) for p in prefix_filters)}
+        stale_groups = db_groups_filtered - current_groups
         for stale_group in stale_groups:
             if dry_run:
                 log(f"    [DRY-RUN] Would remove group: {username} -> {stale_group}")
