@@ -1,15 +1,19 @@
 # ADAuditor
 
-ADAuditor is a Python tool that connects to Active Directory via LDAP/LDAPS, extracts users from groups matching a prefix (e.g., `SG_AWS`), sends access review emails to managers, and logs audit entries in a MySQL database.
+ADAuditor is a Python tool that connects to Active Directory via LDAP/LDAPS, extracts users from specified groups, sends access review emails to managers, and logs audit entries in a MySQL database.
+
+---
 
 ## 🚀 Features
 
-- Connects to Active Directory over LDAP or LDAPS (with optional cert validation skipping)
-- Uses group prefix matching to locate relevant groups
-- Sends audit emails to managers listing users and group memberships
-- Supports dry-run and summary reporting
-- Optionally retrieves LDAP/MySQL credentials from **AWS Secrets Manager**
-- Tracks audits in MySQL (`users`, `user_groups`, and `audit_log` tables)
+- Connects to AD over LDAP or LDAPS (optionally skipping certificate validation)
+- Uses one or more group name prefixes (e.g., `SG_AWS`) to fetch users
+- Sends access review emails to managers with confirmation links
+- Logs audit data to MySQL (`users`, `user_groups`, and `audit_log` tables)
+- Removes stale group mappings
+- Dry-run mode for previewing actions
+- Pulls LDAP/MySQL credentials securely from AWS Secrets Manager
+- Allows full override of group prefixes via CLI
 
 ---
 
@@ -18,15 +22,17 @@ ADAuditor is a Python tool that connects to Active Directory via LDAP/LDAPS, ext
 ### `config.ini`
 
 ```ini
+[groups]
+prefixes = SG_AWS,SG_DEMO
+
 [aws]
-region=eu-west-2
+region = eu-west-2
 
 [ldap]
 server = ldaps://domain.local
 bind_user = CN=Example,CN=Users,DC=example,DC=local
 bind_password = yourpassword
 base_dn = DC=example,DC=local
-group_prefix = SG_AWS
 skip_cert_validation = true
 ;secret_name = ad_auditor_ldap_secret
 
@@ -54,14 +60,13 @@ notify_on_minor_errors = yes
 min_days_between_audits = 30
 max_audits_per_manager_per_day = 5
 ```
-
-> ✅ You can either specify credentials directly in the INI file **or** provide a `secret_name` and store them in AWS Secrets Manager — **not both**.
+You can either specify credentials directly in the INI file **or** provide a `secret_name` and store them in AWS Secrets Manager — **not both**.
 
 ---
 
 ## 🔐 AWS Secrets Manager
 
-To create the required secrets, run:
+If you prefer, you can store credentials securely:
 
 ### LDAP Secret
 
@@ -74,7 +79,6 @@ aws secretsmanager create-secret \
     "bind_user": "CN=Example,CN=Users,DC=example,DC=local",
     "bind_password": "yourpassword",
     "base_dn": "DC=example,DC=local",
-    "group_prefix": "SG_AWS",
     "skip_cert_validation": "true"
   }'
 ```
@@ -98,25 +102,37 @@ aws secretsmanager create-secret \
 
 ## 🧪 Usage
 
-Run a dry audit with summary only:
+### Dry run only
 
 ```bash
 python3 ad_auditor.py --dry-run
 ```
 
-List unique manager emails:
+### Limit by group prefix (override config)
+
+```bash
+python3 ad_auditor.py --group-prefix SG_AWS --group-prefix SG_DEV
+```
+
+### Skip sending emails (update DB only)
+
+```bash
+python3 ad_auditor.py --update-only
+```
+
+### List managers
 
 ```bash
 python3 ad_auditor.py --list-managers
 ```
 
-List manager email addresses and how many users they manage:
+### List manager user counts
 
 ```bash
 python3 ad_auditor.py --list-manager-counts
 ```
 
-Send audit emails ignoring daily max per manager:
+### Override daily cap on manager emails
 
 ```bash
 python3 ad_auditor.py --send-all-audit-emails
@@ -124,7 +140,7 @@ python3 ad_auditor.py --send-all-audit-emails
 
 ---
 
-## 📦 Dependencies
+## 📦 Requirements
 
 - Python 3.7+
 - `boto3`
@@ -142,6 +158,7 @@ pip install -r requirements.txt
 ## 🛡️ Security
 
 Avoid storing plaintext credentials in `config.ini`. Use AWS Secrets Manager wherever possible and ensure appropriate IAM permissions are set for access.
+
 
 ---
 
