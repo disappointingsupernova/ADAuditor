@@ -19,7 +19,7 @@ import json
 # Parse arguments
 class WideHelpFormatter(argparse.HelpFormatter):
     def __init__(self, prog):
-        super().__init__(prog, max_help_position=35, width=120)
+        super().__init__(prog, max_help_position=45, width=120)
 
 parser = argparse.ArgumentParser(
     formatter_class=WideHelpFormatter
