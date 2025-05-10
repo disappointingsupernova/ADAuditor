@@ -10,13 +10,21 @@ import traceback
 import uuid
 from collections import defaultdict
 import argparse
+from argparse import RawTextHelpFormatter
 import sys
 import ssl
 import boto3
 import json
 
 # Parse arguments
-parser = argparse.ArgumentParser()
+class WideHelpFormatter(argparse.HelpFormatter):
+    def __init__(self, prog):
+        super().__init__(prog, max_help_position=35, width=120)
+
+parser = argparse.ArgumentParser(
+    formatter_class=WideHelpFormatter
+)
+
 parser.add_argument('--dry-run', action='store_true', help='Preview actions without making changes')
 parser.add_argument('--list-managers', action='store_true', help='List unique managers from AD and exit')
 parser.add_argument('--list-manager-counts', action='store_true', help='List manager emails and number of users they manage')
