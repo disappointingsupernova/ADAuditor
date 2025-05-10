@@ -198,55 +198,65 @@ def send_minor_error(subject, message):
     if config['alerts'].get('notify_on_minor_errors', 'no').lower() == 'yes':
         send_error_email(subject, message)
 
+def get_manager_email_from_dn(conn, manager_dn):
+    if manager_dn and manager_dn.strip():
+        try:
+            conn.search(manager_dn, '(objectClass=person)', attributes=['mail'])
+            if conn.entries:
+                return str(conn.entries[0].mail)
+        except Exception as e:
+            log(f"    [!] Error fetching manager details for DN {manager_dn}: {e}")
+    return None
+
 def list_managers_only():
     conn = ldap_connection()
-    groups = search_groups_by_prefixes(conn, BASE_DN, GROUP_PREFIXES)
-    log(f"Found {len(groups)} groups.")
+    for prefix in GROUP_PREFIXES:
+        log(f"Searching for groups starting with prefix: {prefix}")
+        conn.search(BASE_DN, f'(&(objectClass=group)(cn={prefix}*))', attributes=['member', 'cn'])
+        log(f"Found {len(conn.entries)} groups.")
 
-    unique_managers = set()
-    for group in groups:
-        members = group.member.values if 'member' in group else []
-        for member_dn in members:
-            conn.search(member_dn, '(objectClass=person)', attributes=['manager'])
-            if not conn.entries:
-                continue
-            user = conn.entries[0]
-            manager_dn = str(user.manager) if 'manager' in user else None
-            if manager_dn:
-                conn.search(manager_dn, '(objectClass=person)', attributes=['mail'])
-                if conn.entries:
-                    manager_email = str(conn.entries[0].mail)
-                    if manager_email:
-                        unique_managers.add(manager_email)
-    print("\n=== Unique Manager Emails ===")
-    for email in sorted(unique_managers):
-        print(email)
+        unique_managers = set()
+        for group in conn.entries:
+            members = group.member.values if 'member' in group else []
+            for member_dn in members:
+                conn.search(member_dn, '(objectClass=person)', attributes=['manager'])
+                if not conn.entries:
+                    continue
+                user = conn.entries[0]
+                manager_dn = str(user.manager) if 'manager' in user else None
+                email = get_manager_email_from_dn(conn, manager_dn)
+                if email:
+                    unique_managers.add(email)
+
+        print("\n=== Unique Manager Emails ===")
+        for email in sorted(unique_managers):
+            print(email)
     conn.unbind()
 
 def list_manager_user_counts():
     conn = ldap_connection()
-    groups = search_groups_by_prefixes(conn, BASE_DN, GROUP_PREFIXES)
-    log(f"Found {len(groups)} groups.")
+    for prefix in GROUP_PREFIXES:
+        log(f"Searching for groups starting with prefix: {prefix}")
+        conn.search(BASE_DN, f'(&(objectClass=group)(cn={prefix}*))', attributes=['member', 'cn'])
 
-    manager_user_counts = defaultdict(set)
-    for group in groups:
-        members = group.member.values if 'member' in group else []
-        for member_dn in members:
-            conn.search(member_dn, '(objectClass=person)', attributes=['manager', 'sAMAccountName'])
-            if not conn.entries:
-                continue
-            user = conn.entries[0]
-            manager_dn = str(user.manager) if 'manager' in user else None
-            username = str(user.sAMAccountName) if 'sAMAccountName' in user else None
-            if manager_dn and username:
-                conn.search(manager_dn, '(objectClass=person)', attributes=['mail'])
-                if conn.entries:
-                    manager_email = str(conn.entries[0].mail)
-                    if manager_email:
-                        manager_user_counts[manager_email].add(username)
-    print("\n=== Manager Emails and Managed Users Count ===")
-    for email, users in sorted(manager_user_counts.items()):
-        print(f"{email:<40} | {len(users)} users")
+        manager_user_counts = defaultdict(set)
+        for group in conn.entries:
+            members = group.member.values if 'member' in group else []
+            for member_dn in members:
+                conn.search(member_dn, '(objectClass=person)', attributes=['manager', 'sAMAccountName'])
+                if not conn.entries:
+                    continue
+                user = conn.entries[0]
+                manager_dn = str(user.manager) if 'manager' in user else None
+                username = str(user.sAMAccountName) if 'sAMAccountName' in user else None
+                if manager_dn and username:
+                    email = get_manager_email_from_dn(conn, manager_dn)
+                    if email:
+                        manager_user_counts[email].add(username)
+
+        print("\n=== Manager Emails and Managed Users Count ===")
+        for email, users in sorted(manager_user_counts.items()):
+            print(f"{email:<40} | {len(users)} users")
     conn.unbind()
 
 if list_managers_mode:
