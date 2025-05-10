@@ -105,6 +105,31 @@ def ldap_connection():
     log("LDAP bind successful.")
     return conn
 
+def mysql_connection():
+    log("Connecting to MySQL database...")
+    mysql_secret_key = config['mysql'].get('secret_name', fallback=None)
+    mysql_has_plain = all(k in config['mysql'] for k in ('host', 'port', 'user', 'password', 'database'))
+    if mysql_secret_key and mysql_has_plain:
+        print("[!] Both MySQL secret_name and plaintext credentials are configured. Please remove one.")
+        sys.exit(1)
+    if mysql_secret_key:
+        db_secret = get_secret(mysql_secret_key)
+        return mysql.connector.connect(
+            host=db_secret['host'],
+            port=int(db_secret['port']),
+            user=db_secret['user'],
+            password=db_secret['password'],
+            database=db_secret['database']
+        )
+    else:
+        return mysql.connector.connect(
+            host=config['mysql']['host'],
+            port=config.getint('mysql', 'port'),
+            user=config['mysql']['user'],
+            password=config['mysql']['password'],
+            database=config['mysql']['database']
+        )
+
 def send_email(to, subject, plain_text, html_content):
     msg = MIMEMultipart("alternative")
     msg['Subject'] = subject
@@ -204,29 +229,8 @@ if list_manager_counts_mode:
 try:
     conn = ldap_connection()
 
-    log("Connecting to MySQL database...")
-    mysql_secret_key = config['mysql'].get('secret_name', fallback=None)
-    mysql_has_plain = all(k in config['mysql'] for k in ('host', 'port', 'user', 'password', 'database'))
-    if mysql_secret_key and mysql_has_plain:
-        print("[!] Both MySQL secret_name and plaintext credentials are configured. Please remove one.")
-        sys.exit(1)
-    if mysql_secret_key:
-        db_secret = get_secret(mysql_secret_key)
-        db = mysql.connector.connect(
-            host=db_secret['host'],
-            port=int(db_secret['port']),
-            user=db_secret['user'],
-            password=db_secret['password'],
-            database=db_secret['database']
-        )
-    else:
-        db = mysql.connector.connect(
-            host=config['mysql']['host'],
-            port=config.getint('mysql', 'port'),
-            user=config['mysql']['user'],
-            password=config['mysql']['password'],
-            database=config['mysql']['database']
-        )
+    db = mysql_connection()
+    
     cursor = db.cursor()
 
     log("Ensuring tables exist...")
