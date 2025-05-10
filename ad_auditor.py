@@ -443,7 +443,8 @@ try:
         for username, email in users:
             display_name = user_display_names.get(username, username)
             cursor.execute('SELECT group_name FROM user_groups WHERE username = %s', (username,))
-            groups = [row[0] for row in cursor.fetchall()]
+            all_groups = [row[0] for row in cursor.fetchall()]
+            groups = [g for g in all_groups if any(g.lower().startswith(p.lower()) for p in GROUP_PREFIXES)]
             group_list = ''.join(f"<li>{g}</li>" for g in groups)
             plain_groups = '\n'.join(groups)
 
