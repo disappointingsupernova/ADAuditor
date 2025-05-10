@@ -22,12 +22,14 @@ parser.add_argument('--list-managers', action='store_true', help='List unique ma
 parser.add_argument('--list-manager-counts', action='store_true', help='List manager emails and number of users they manage')
 parser.add_argument('--send-all-audit-emails', action='store_true', help='Ignore max emails per manager limit')
 parser.add_argument('--update-only', action='store_true', help='Only update database, do not send audit emails')
+parser.add_argument('--group-prefix', action='append', help='Override default group prefix (can be passed multiple times)')
 args = parser.parse_args()
 dry_run = args.dry_run
 list_managers_mode = args.list_managers
 list_manager_counts_mode = args.list_manager_counts
 send_all = args.send_all_audit_emails
 update_only = getattr(args, 'update_only', False)
+override_group_prefixes = args.group_prefix or []
 
 # Load config
 config = configparser.ConfigParser()
@@ -48,7 +50,7 @@ def get_secret(secret_name, region_name=None):
 
 # LDAP configuration
 ldap_secret_key = config['ldap'].get('secret_name', fallback=None)
-ldap_has_plain = all(k in config['ldap'] for k in ('server', 'bind_user', 'bind_password', 'base_dn', 'group_prefix'))
+ldap_has_plain = all(k in config['ldap'] for k in ('server', 'bind_user', 'bind_password', 'base_dn'))
 if ldap_secret_key and ldap_has_plain:
     print("[!] Both LDAP secret_name and plaintext credentials are configured. Please remove one.")
     sys.exit(1)
@@ -58,15 +60,17 @@ if ldap_secret_key:
     BIND_USER = ldap_secret['bind_user']
     BIND_PASS = ldap_secret['bind_password']
     BASE_DN = ldap_secret['base_dn']
-    GROUP_PREFIX = ldap_secret['group_prefix']
     SKIP_CERT_VALIDATION = ldap_secret.get('skip_cert_validation', 'false').lower() == 'true'
 else:
     LDAP_SERVER = config['ldap']['server']
     BIND_USER = config['ldap']['bind_user']
     BIND_PASS = config['ldap']['bind_password']
     BASE_DN = config['ldap']['base_dn']
-    GROUP_PREFIX = config['ldap']['group_prefix']
     SKIP_CERT_VALIDATION = config['ldap'].getboolean('skip_cert_validation', fallback=False)
+
+# Group prefixes
+default_prefixes = config.get('groups', 'prefixes', fallback='SG_AWS').split(',')
+GROUP_PREFIXES = [p.strip() for p in override_group_prefixes] if override_group_prefixes else [p.strip() for p in default_prefixes]
 
 # Determine SSL usage and default port
 use_ssl = LDAP_SERVER.lower().startswith("ldaps")
@@ -104,6 +108,26 @@ def ldap_connection():
     conn = Connection(server, BIND_USER, BIND_PASS, auto_bind=True)
     log("LDAP bind successful.")
     return conn
+
+def search_groups_by_prefixes(conn, base_dn, prefixes):
+    """
+    Searches for LDAP groups whose CN starts with any of the given prefixes.
+    
+    Args:
+        conn (ldap3.Connection): An active LDAP connection.
+        base_dn (str): The base DN to search under.
+        prefixes (list): List of group name prefixes to search for.
+
+    Returns:
+        list: All matched group entries across prefixes.
+    """
+    all_groups = []
+    for prefix in prefixes:
+        log(f"Searching for groups starting with prefix: {prefix}")
+        conn.search(base_dn, f'(&(objectClass=group)(cn={prefix}*))', attributes=['member', 'cn'])
+        all_groups.extend(conn.entries)
+    return all_groups
+
 
 def mysql_connection():
     log("Connecting to MySQL database...")
@@ -168,12 +192,11 @@ def send_minor_error(subject, message):
 
 def list_managers_only():
     conn = ldap_connection()
-    print(f"[+] Searching for groups starting with prefix: {GROUP_PREFIX}")
-    conn.search(BASE_DN, f'(&(objectClass=group)(cn={GROUP_PREFIX}*))', attributes=['member', 'cn'])
-    print(f"[+] Found {len(conn.entries)} groups.")
+    groups = search_groups_by_prefixes(conn, BASE_DN, GROUP_PREFIXES)
+    log(f"Found {len(groups)} groups.")
 
     unique_managers = set()
-    for group in conn.entries:
+    for group in groups:
         members = group.member.values if 'member' in group else []
         for member_dn in members:
             conn.search(member_dn, '(objectClass=person)', attributes=['manager'])
@@ -194,11 +217,11 @@ def list_managers_only():
 
 def list_manager_user_counts():
     conn = ldap_connection()
-    print(f"[+] Searching for groups starting with prefix: {GROUP_PREFIX}")
-    conn.search(BASE_DN, f'(&(objectClass=group)(cn={GROUP_PREFIX}*))', attributes=['member', 'cn'])
+    groups = search_groups_by_prefixes(conn, BASE_DN, GROUP_PREFIXES)
+    log(f"Found {len(groups)} groups.")
 
     manager_user_counts = defaultdict(set)
-    for group in conn.entries:
+    for group in groups:
         members = group.member.values if 'member' in group else []
         for member_dn in members:
             conn.search(member_dn, '(objectClass=person)', attributes=['manager', 'sAMAccountName'])
@@ -261,14 +284,13 @@ try:
     ''')
     db.commit()
 
-    log(f"Searching for groups starting with prefix: {GROUP_PREFIX}")
-    conn.search(BASE_DN, f'(&(objectClass=group)(cn={GROUP_PREFIX}*))', attributes=['member', 'cn'])
-    group_count = len(conn.entries)
-    log(f"Found {group_count} groups.")
+    log(f"Searching for groups starting with prefix: {GROUP_PREFIXES}")
+    groups = search_groups_by_prefixes(conn, BASE_DN, GROUP_PREFIXES)
+    log(f"Found {len(groups)} groups.")
 
     user_display_names = {}
 
-    for group in conn.entries:
+    for group in groups:
         group_name = str(group.cn)
         log(f"\n[Group] {group_name}")
         members = group.member.values if 'member' in group else []
