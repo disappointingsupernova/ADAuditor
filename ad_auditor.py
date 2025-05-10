@@ -403,13 +403,22 @@ try:
     log("\n[✓] User and group import completed.\n")
 
     log("\n[✓] Checking for stale group mappings...")
-    for username, current_groups in user_current_groups.items():
-        # Only consider existing user_group mappings that match the currently scanned prefixes
-        prefix_filters = tuple(p.lower() for p in GROUP_PREFIXES)
+    cursor.execute('SELECT DISTINCT username FROM user_groups')
+    all_usernames = [row[0] for row in cursor.fetchall()]
+
+    for username in all_usernames:
+        current_groups = user_current_groups.get(username, set())
         cursor.execute('SELECT group_name FROM user_groups WHERE username = %s', (username,))
         db_groups = set(row[0] for row in cursor.fetchall())
-        db_groups_filtered = {g for g in db_groups if any(g.lower().startswith(p) for p in prefix_filters)}
+
+        # Only consider groups that match the provided prefixes
+        db_groups_filtered = {
+            g for g in db_groups
+            if any(g.lower().startswith(p.lower()) for p in GROUP_PREFIXES)
+        }
+
         stale_groups = db_groups_filtered - current_groups
+
         for stale_group in stale_groups:
             if dry_run:
                 log(f"    [DRY-RUN] Would remove group: {username} -> {stale_group}")
