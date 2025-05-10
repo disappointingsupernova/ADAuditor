@@ -219,6 +219,15 @@ def list_managers_only():
         for group in conn.entries:
             members = group.member.values if 'member' in group else []
             for member_dn in members:
+                conn.search(member_dn, '(objectClass=*)', attributes=['objectClass'])
+                if not conn.entries:
+                    log(f"    [-] Failed to fetch entry at: {member_dn}")
+                    continue
+
+                object_classes = [str(oc).lower() for oc in conn.entries[0]['objectClass']]
+                if 'person' not in object_classes:
+                    log(f"    [-] Skipping non-user entry: {member_dn} (objectClass: {object_classes})")
+                    continue
                 conn.search(member_dn, '(objectClass=person)', attributes=['manager'])
                 if not conn.entries:
                     continue
@@ -243,6 +252,16 @@ def list_manager_user_counts():
         for group in conn.entries:
             members = group.member.values if 'member' in group else []
             for member_dn in members:
+                conn.search(member_dn, '(objectClass=*)', attributes=['objectClass'])
+                if not conn.entries:
+                    log(f"    [-] Failed to fetch entry at: {member_dn}")
+                    continue
+
+                object_classes = [str(oc).lower() for oc in conn.entries[0]['objectClass']]
+                if 'person' not in object_classes:
+                    log(f"    [-] Skipping non-user entry: {member_dn} (objectClass: {object_classes})")
+                    continue
+                
                 conn.search(member_dn, '(objectClass=person)', attributes=['manager', 'sAMAccountName'])
                 if not conn.entries:
                     continue
@@ -314,6 +333,15 @@ try:
         members = group.member.values if 'member' in group else []
 
         for member_dn in members:
+            conn.search(member_dn, '(objectClass=*)', attributes=['objectClass'])
+            if not conn.entries:
+                log(f"    [-] Failed to fetch entry at: {member_dn}")
+                continue
+
+            object_classes = [str(oc).lower() for oc in conn.entries[0]['objectClass']]
+            if 'person' not in object_classes:
+                log(f"    [-] Skipping non-user entry: {member_dn} (objectClass: {object_classes})")
+                continue
             log(f"  [User DN] {member_dn}")
             conn.search(member_dn, '(objectClass=person)', attributes=['sAMAccountName', 'mail', 'manager', 'givenName', 'sn'])
             if not conn.entries:
