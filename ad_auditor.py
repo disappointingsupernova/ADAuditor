@@ -31,6 +31,8 @@ parser.add_argument('--list-manager-counts', action='store_true', help='List man
 parser.add_argument('--send-all-audit-emails', action='store_true', help='Ignore max emails per manager limit')
 parser.add_argument('--update-only', action='store_true', help='Only update database, do not send audit emails')
 parser.add_argument('--group-prefix', action='append', help='Override default group prefix (can be passed multiple times)')
+parser.add_argument('--limit-users', type=int, help='Limit the number of users processed (for testing)')
+parser.add_argument('--filter-user-email', type=str, help='Only process a specific user with this email')
 args = parser.parse_args()
 dry_run = args.dry_run
 list_managers_mode = args.list_managers
@@ -38,6 +40,8 @@ list_manager_counts_mode = args.list_manager_counts
 send_all = args.send_all_audit_emails
 update_only = getattr(args, 'update_only', False)
 override_group_prefixes = args.group_prefix or []
+user_limit = args.limit_users
+filter_user_email = args.filter_user_email
 
 # Load config
 config = configparser.ConfigParser()
@@ -425,6 +429,12 @@ try:
         ORDER BY u.last_audited IS NOT NULL, u.last_audited ASC
     ''', (MIN_DAYS,))
     rows = cursor.fetchall()
+
+    if filter_user_email:
+        rows = [r for r in rows if r[1] and r[1].lower() == filter_user_email.lower()]
+
+    if user_limit:
+        rows = rows[:user_limit]
 
     manager_batches = defaultdict(list)
     for username, email, manager_email in rows:
