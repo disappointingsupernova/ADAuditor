@@ -34,6 +34,7 @@ parser.add_argument('--group-prefix', action='append', help='Override default gr
 parser.add_argument('--limit-users', type=int, help='Limit the number of users processed (for testing)')
 parser.add_argument('--filter-user-email', type=str, help='Only process a specific user with this email')
 parser.add_argument('--override-recipient', type=str, help='Override all outbound recipient email addresses (for testing)')
+parser.add_argument('--debug-user', type=str, help='Print debug info for a specific user email')
 args = parser.parse_args()
 dry_run = args.dry_run
 list_managers_mode = args.list_managers
@@ -44,6 +45,8 @@ override_group_prefixes = args.group_prefix or []
 user_limit = args.limit_users
 filter_user_email = args.filter_user_email
 override_recipient = args.override_recipient
+debug_user_email = args.debug_user
+
 
 # Load config
 config = configparser.ConfigParser()
@@ -309,6 +312,64 @@ if list_managers_mode:
 
 if list_manager_counts_mode:
     list_manager_user_counts()
+    sys.exit(0)
+
+if 'debug_user_email' in locals() and debug_user_email:
+    db = mysql_connection()
+    conn = ldap_connection()
+    cursor = db.cursor()
+
+    # 1. Find matching username
+    cursor.execute('SELECT username, email FROM users WHERE LOWER(email) = %s', (debug_user_email.lower(),))
+    row = cursor.fetchone()
+    if not row:
+        print(f"[!] No user found in DB with email {debug_user_email}")
+        sys.exit(1)
+
+    username = row[0]
+    print(f"\n=== DEBUG: {username} ({debug_user_email}) ===")
+
+    # 2. Collect LDAP groups by group prefix
+    user_current_groups = defaultdict(set)
+    all_groups = search_groups_by_prefixes(conn, BASE_DN, GROUP_PREFIXES)
+    for group in all_groups:
+        group_name = str(group.cn)
+        members = group.member.values if 'member' in group else []
+        for member_dn in members:
+            conn.search(member_dn, '(objectClass=person)', attributes=['mail', 'sAMAccountName'])
+            if conn.entries:
+                entry = conn.entries[0]
+                if 'mail' in entry and str(entry.mail).lower() == debug_user_email.lower():
+                    ldap_username = str(entry.sAMAccountName)
+                    user_current_groups[ldap_username].add(group_name)
+
+    ldap_groups = user_current_groups.get(username, set())
+    print(f"LDAP Groups: {ldap_groups}")
+
+    # 3. Load DB groups
+    cursor.execute('SELECT group_name FROM user_groups WHERE username = %s', (username,))
+    db_groups = set(row[0] for row in cursor.fetchall())
+    print(f"DB Groups:   {db_groups}")
+
+    # 4. Diff
+    if db_groups != ldap_groups:
+        print("Differences detected:")
+        print(f"  In DB not in LDAP:   {db_groups - ldap_groups}")
+        print(f"  In LDAP not in DB:   {ldap_groups - db_groups}")
+    else:
+        print("Groups are consistent.")
+
+    # 5. Show audit history
+    cursor.execute('SELECT audit_date FROM audit_log WHERE username = %s ORDER BY audit_date DESC LIMIT 5', (username,))
+    audits = cursor.fetchall()
+    print("Recent Audits:")
+    for row in audits:
+        print(f" - {row[0]}")
+
+    db.rollback()
+    cursor.close()
+    db.close()
+    conn.unbind()
     sys.exit(0)
 
 try:
