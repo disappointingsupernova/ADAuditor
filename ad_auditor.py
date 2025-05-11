@@ -169,7 +169,11 @@ def mysql_connection():
 def send_email(to, subject, plain_text, html_content):
     msg = MIMEMultipart("alternative")
     msg['Subject'] = subject
-    msg['From'] = FROM_ADDRESS
+    from_name = config['email'].get('from_name', '').strip()
+    if from_name:
+        msg['From'] = f"{from_name} <{FROM_ADDRESS}>"
+    else:
+        msg['From'] = FROM_ADDRESS
     msg['To'] = to if isinstance(to, str) else ", ".join(to)
 
     cc_list = [x.strip() for x in config['email'].get('cc', '').split(',') if x.strip()]
