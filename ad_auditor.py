@@ -171,13 +171,27 @@ def send_email(to, subject, plain_text, html_content):
     msg['Subject'] = subject
     msg['From'] = FROM_ADDRESS
     msg['To'] = to if isinstance(to, str) else ", ".join(to)
+
+    cc_list = [x.strip() for x in config['email'].get('cc', '').split(',') if x.strip()]
+    bcc_list = [x.strip() for x in config['email'].get('bcc', '').split(',') if x.strip()]
+    if cc_list:
+        msg['Cc'] = ", ".join(cc_list)
+
+    recipients = []
+    if isinstance(to, str):
+        recipients.append(to)
+    else:
+        recipients.extend(to)
+    recipients.extend(cc_list)
+    recipients.extend(bcc_list)
+
     msg.attach(MIMEText(plain_text, "plain"))
     msg.attach(MIMEText(html_content, "html"))
 
     try:
         if EMAIL_MODE == 'localhost':
             with smtplib.SMTP('localhost') as s:
-                s.send_message(msg)
+                s.send_message(msg, to_addrs=recipients)
         elif EMAIL_MODE == 'smtp':
             with smtplib.SMTP(config['email']['smtp_server'], config.getint('email', 'smtp_port')) as s:
                 s.ehlo()
@@ -189,10 +203,11 @@ def send_email(to, subject, plain_text, html_content):
                         s.login(smtp_user, smtp_pass)
                 except smtplib.SMTPNotSupportedError:
                     log("  [SMTP] TLS not supported, continuing without it.")
-                s.send_message(msg)
+                s.send_message(msg, to_addrs=recipients)
         print(f"✔ Email sent to {msg['To']}")
     except Exception as e:
         print(f"✘ Failed to send email to {msg['To']}: {e}")
+
 
 def send_error_email(subject, message):
     recipients = [x.strip() for x in config['alerts']['error_recipients'].split(',')]
