@@ -144,7 +144,7 @@ if ($already_reviewed && !$message) {
         <small><?= htmlspecialchars($email) ?></small>
     </div>
     <div>
-        <a href="/saml/sls.php" class="btn btn-outline-light btn-sm">Sign out</a>
+        <a href="/logout.php" class="btn btn-outline-light btn-sm">Sign out</a>
     </div>
 </div>
 <div class="banner-wrapper">
