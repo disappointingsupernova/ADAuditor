@@ -125,7 +125,7 @@ if ($already_reviewed && !$message) {
 <html lang="en">
 <head>
     <meta charset="UTF-8">
-    <title>Access Review</title>
+    <title><?php echo $application_name;?></title>
     <link rel="icon" type="image/x-icon" href="/radius.ico">
     <link href="https://cdn.jsdelivr.net/npm/bootstrap@5.3.3/dist/css/bootstrap.min.css" rel="stylesheet">
     <style>
@@ -166,7 +166,7 @@ if ($already_reviewed && !$message) {
 <div class="container mt-4">
     <div class="card shadow">
         <div class="card-header bg-primary text-white text-center">
-            <h4>AWS Access Review <?php if ($audit): ?> for <?= $username ?> <?php endif ?></h4>
+            <h4><?php echo $application_name; if ($audit): ?> for <?= $username ?> <?php endif ?></h4>
         </div>
         <div class="card-body">
             <?php if ($message): ?>
@@ -225,5 +225,6 @@ function selectAll() {
 }
 </script>
 
+<?php include 'footer.php'; ?>
 </body>
 </html>

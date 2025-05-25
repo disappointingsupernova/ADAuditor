@@ -1,6 +1,9 @@
 <?php
 // config.php
 
+$copyright = "DisappointingSupernova"
+$application_name = "AWS Access Review";
+
 require 'vendor/autoload.php'; // Requires AWS SDK via Composer
 
 use Aws\SecretsManager\SecretsManagerClient;

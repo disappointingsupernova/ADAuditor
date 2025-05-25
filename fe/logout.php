@@ -68,5 +68,6 @@ session_destroy();
     </div>
 </div>
 
+<?php include 'footer.php'; ?>
 </body>
 </html>
