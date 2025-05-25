@@ -1,0 +1,7 @@
+{
+    "require": {
+        "phpmailer/phpmailer": "^6.10",
+        "aws/aws-sdk-php": "^3.343",
+        "onelogin/php-saml": "^4.2"
+    }
+}
