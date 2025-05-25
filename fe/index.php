@@ -8,6 +8,13 @@ require 'vendor/autoload.php';
 $secret = $_GET['token'] ?? null;
 $action = $_GET['action'] ?? null;
 
+$userInfo = $_SESSION['saml_user_data'] ?? [];
+
+$firstName = $userInfo['http://schemas.xmlsoap.org/ws/2005/05/identity/claims/givenname'][0] ?? '';
+$lastName = $userInfo['http://schemas.xmlsoap.org/ws/2005/05/identity/claims/surname'][0] ?? '';
+$email = $userInfo['http://schemas.xmlsoap.org/ws/2005/05/identity/claims/emailaddress'][0] ?? '';
+$displayName = trim("$firstName $lastName");
+
 $message = null;
 $message_class = 'success'; // Default to success
 
@@ -125,9 +132,21 @@ if ($already_reviewed && !$message) {
         .logo-over-banner { position: absolute; top: 50%; left: 50%; transform: translate(-50%, -60%); z-index: 2; }
         .logo-over-banner svg { height: 60px; max-width: 90vw; }
         .banner-wrapper { position: relative; width: 100%; }
+        .text-white {
+            text-shadow: 1px 1px 2px #000;
+        }
     </style>
 </head>
 <body class="bg-light pb-5 pt-0">
+<div class="position-absolute top-0 start-0 w-100 text-white d-flex justify-content-between align-items-center px-4 py-2" style="background: rgba(0, 0, 0, 0.4); z-index: 10;">
+    <div>
+        <strong><?= htmlspecialchars($displayName) ?></strong><br>
+        <small><?= htmlspecialchars($email) ?></small>
+    </div>
+    <div>
+        <a href="/saml/sls.php" class="btn btn-outline-light btn-sm">Sign out</a>
+    </div>
+</div>
 <div class="banner-wrapper">
     <img src="/images/banner.png" class="img-fluid w-100" style="max-height: 250px; object-fit: cover;">
     <div class="logo-over-banner text-center">
