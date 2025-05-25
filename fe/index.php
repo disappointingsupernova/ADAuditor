@@ -63,15 +63,15 @@ function send_smtp_notification($to, $subject, $body) {
 
 if (!$secret) {
     http_response_code(400);
-    echo "Invalid request — token missing.";
-    exit;
+    $message = "Invalid request — token missing.";
+    $message_class = 'danger';
 }
 
 $stmt = $pdo->prepare("SELECT * FROM audit_log WHERE secret = ?");
 $stmt->execute([$secret]);
 $audit = $stmt->fetch(PDO::FETCH_ASSOC);
 
-if (!$audit) {
+if (!$audit && $secret) {
     http_response_code(404);
     $message = "Invalid Token - Audit not found.";
     $message_class = 'warning';
