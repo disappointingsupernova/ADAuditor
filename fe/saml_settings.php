@@ -9,7 +9,7 @@ return [
             'binding' => 'urn:oasis:names:tc:SAML:2.0:bindings:HTTP-POST',
         ],
         'singleLogoutService' => [
-            'url' => 'https://adaudit.domain.internal/saml/sls.php',
+            'url' => 'https://adaudit.domain.internal/logout.php',
             'binding' => 'urn:oasis:names:tc:SAML:2.0:bindings:HTTP-Redirect',
         ],
         'x509cert' => '',
