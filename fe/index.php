@@ -78,6 +78,8 @@ if (!$secret) {
         $message = "Please select a user to review:";
         $message_class = 'none';
         $show_reviews_table = true;
+        
+        log_action($pdo, 'Audit', "Listed " . count($outstandingReviews) . " available reviews", $email);
     }
 }
 
