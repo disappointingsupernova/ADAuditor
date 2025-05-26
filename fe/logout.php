@@ -1,5 +1,6 @@
 <?php
 require_once __DIR__ . '/vendor/autoload.php';
+require 'logging.php';
 
 use OneLogin\Saml2\Auth;
 
@@ -7,6 +8,9 @@ session_start();
 
 $samlSettings = require __DIR__ . '/saml_settings.php';
 $auth = new Auth($samlSettings);
+
+$email = $_SESSION['user_email'];
+log_action($pdo, 'Login', 'User logged out', $email);
 
 // Process SAML logout response or request
 if (isset($_GET['SAMLResponse']) || isset($_GET['SAMLRequest'])) {
