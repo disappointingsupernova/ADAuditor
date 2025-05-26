@@ -62,24 +62,38 @@ function send_smtp_notification($to, $subject, $body) {
 
 
 if (!$secret) {
-    http_response_code(400);
-    $message = "Invalid request — token missing.";
-    $message_class = 'danger';
+    $stmt = $pdo->prepare("SELECT username, secret FROM audit_log WHERE manager_email = ? AND date_reviewed IS NULL ORDER BY username");
+    $stmt->execute([$email]);
+    $outstandingReviews = $stmt->fetchAll(PDO::FETCH_ASSOC);
+
+    if (empty($outstandingReviews)) {
+        http_response_code(400);
+        $message = "You have no outstanding access reviews.";
+        $message_class = 'info';
+    } else {
+        $message = "Please select a user to review:";
+        $message_class = 'primary';
+    }
 }
 
-$stmt = $pdo->prepare("SELECT * FROM audit_log WHERE secret = ?");
-$stmt->execute([$secret]);
-$audit = $stmt->fetch(PDO::FETCH_ASSOC);
+$audit = null;
+if ($secret) {
+    $stmt = $pdo->prepare("SELECT * FROM audit_log WHERE secret = ?");
+    $stmt->execute([$secret]);
+    $audit = $stmt->fetch(PDO::FETCH_ASSOC);
 
-if (!$audit && $secret) {
-    http_response_code(404);
-    $message = "Invalid Token - Audit not found.";
-    $message_class = 'warning';
+    if (!$audit) {
+        http_response_code(404);
+        $message = "Invalid Token - Audit not found.";
+        $message_class = 'warning';
+    }
 }
 
-$username = htmlspecialchars($audit['username']);
-$manager_email = htmlspecialchars($audit['manager_email']);
-$already_reviewed = !empty($audit['date_reviewed']);
+if ($audit) {
+    $username = htmlspecialchars($audit['username']);
+    $manager_email = htmlspecialchars($audit['manager_email']);
+    $already_reviewed = !empty($audit['date_reviewed']);
+}
 
 if ($_SERVER['REQUEST_METHOD'] === 'POST') {
     $groupsToRemove = $_POST['remove_groups'] ?? [];
@@ -109,10 +123,12 @@ if ($action === 'approve' && !$already_reviewed) {
 }
 
 // Fetch user's current groups
-$stmt = $pdo->prepare("SELECT group_name FROM user_groups WHERE username = ?");
-$stmt->execute([$audit['username']]);
-$groups = $stmt->fetchAll(PDO::FETCH_COLUMN);
-
+$groups = [];
+if ($audit) {
+    $stmt = $pdo->prepare("SELECT group_name FROM user_groups WHERE username = ?");
+    $stmt->execute([$audit['username']]);
+    $groups = $stmt->fetchAll(PDO::FETCH_COLUMN);
+}
 
 if ($already_reviewed && !$message) {
     $message = "This access review for <strong>{$username}</strong> has already been marked as reviewed.";
@@ -173,6 +189,16 @@ if ($already_reviewed && !$message) {
                 <div class="alert alert-<?= htmlspecialchars($message_class) ?> text-center fs-5">
                     <?= $message ?>
                 </div>
+                <?php if (isset($outstandingReviews) && !empty($outstandingReviews)): ?>
+                    <ul class="list-group list-group-flush mt-3">
+                        <?php foreach ($outstandingReviews as $review): ?>
+                            <li class="list-group-item d-flex justify-content-between align-items-center">
+                                <span><?= htmlspecialchars($review['username']) ?></span>
+                                <a href="?token=<?= urlencode($review['secret']) ?>" class="btn btn-sm btn-outline-primary">Review</a>
+                            </li>
+                        <?php endforeach; ?>
+                    </ul>
+                <?php endif; ?>
             <?php else: ?>
                 <form method="POST" onsubmit="selectAll();">
                     <p><strong>Select any groups you wish to remove from <?= $username ?></strong></p>
