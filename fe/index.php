@@ -157,7 +157,7 @@ if ($audit) {
 }
 
 if (isset($already_reviewed) && $already_reviewed && !$message) {
-    $message = "This access review for <strong>{$username}</strong> has already been marked as reviewed.";
+    $message = "This access review for <strong>{$username}</strong> has already been completed.";
     $message_class = 'info';
 }
 ?>
