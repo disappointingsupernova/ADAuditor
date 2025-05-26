@@ -18,7 +18,6 @@ $displayName = trim("$firstName $lastName");
 $message = null;
 $message_class = 'success'; // Default to success
 
-
 function send_smtp_notification($to, $subject, $body) {
     global $config;
 
@@ -43,7 +42,6 @@ function send_smtp_notification($to, $subject, $body) {
         $mail->Subject = $subject;
         $mail->Body    = $body;
 
-        // Optionally skip TLS peer verification
         if (isset($config['email']['verify_tls']) && $config['email']['verify_tls'] === false) {
             $mail->SMTPOptions = [
                 'ssl' => [
@@ -60,6 +58,9 @@ function send_smtp_notification($to, $subject, $body) {
     }
 }
 
+$show_form = false;
+$show_reviews_table = false;
+$outstandingReviews = [];
 
 if (!$secret) {
     $stmt = $pdo->prepare("
@@ -79,6 +80,7 @@ if (!$secret) {
     } else {
         $message = "Please select a user to review:";
         $message_class = 'none';
+        $show_reviews_table = true;
     }
 }
 
@@ -99,19 +101,11 @@ if ($audit) {
     $username = htmlspecialchars($audit['username']);
     $manager_email = htmlspecialchars($audit['manager_email']);
     $already_reviewed = !empty($audit['date_reviewed']);
+
+    if (!$already_reviewed && $_SERVER['REQUEST_METHOD'] !== 'POST') {
+        $show_form = true;
+    }
 }
-
-$show_form = false;
-$show_reviews_table = false;
-
-if ($audit && !$already_reviewed && $_SERVER['REQUEST_METHOD'] !== 'POST') {
-    $show_form = true;
-}
-
-if (!$secret && !empty($outstandingReviews)) {
-    $show_reviews_table = true;
-}
-
 
 if ($_SERVER['REQUEST_METHOD'] === 'POST') {
     $groupsToRemove = $_POST['remove_groups'] ?? [];
@@ -121,26 +115,40 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
     $update = $pdo->prepare("UPDATE audit_log SET date_reviewed = ?, changes = ? WHERE id = ?");
     $update->execute([$now, $json, $audit['id']]);
 
-    // Send notification
     $body = "The following groups were requested for removal for user {$username}:\n\n" . implode("\n", $groupsToRemove);
     send_smtp_notification("techops@domain.com", "Access Change Request: $username", $body);
 
     $message = "The requested changes for <strong>{$username}</strong> have been sent to the TechOps team for actioning.";
     $message_class = 'success';
+
+    $show_form = false;
+
+    // Refresh outstanding reviews
+    $stmt = $pdo->prepare("
+        SELECT a.username, a.secret, u.email, CONCAT(u.username, ' (', u.email, ')') AS display_name, a.id, a.audit_date
+        FROM audit_log a
+        LEFT JOIN users u ON a.username = u.username
+        WHERE a.manager_email = ? AND a.date_reviewed IS NULL
+        ORDER BY a.audit_date ASC
+    ");
+    $stmt->execute([$email]);
+    $outstandingReviews = $stmt->fetchAll(PDO::FETCH_ASSOC);
+
+    if (!empty($outstandingReviews)) {
+        $show_reviews_table = true;
+    }
 }
 
-
-// Handle approve action via GET
-if ($action === 'approve' && !$already_reviewed) {
+if ($action === 'approve' && isset($audit) && !$already_reviewed) {
     $now = date('Y-m-d H:i:s');
     $update = $pdo->prepare("UPDATE audit_log SET date_reviewed = ? WHERE id = ?");
     $update->execute([$now, $audit['id']]);
-    
+
     $message = "Existing access for <strong>{$username}</strong> has been approved.";
     $message_class = 'success';
+    $show_form = false;
 }
 
-// Fetch user's current groups
 $groups = [];
 if ($audit) {
     $stmt = $pdo->prepare("SELECT group_name FROM user_groups WHERE username = ?");
@@ -148,11 +156,10 @@ if ($audit) {
     $groups = $stmt->fetchAll(PDO::FETCH_COLUMN);
 }
 
-if ($already_reviewed && !$message) {
+if (isset($already_reviewed) && $already_reviewed && !$message) {
     $message = "This access review for <strong>{$username}</strong> has already been marked as reviewed.";
     $message_class = 'info';
 }
-
 ?>
 
 <!DOCTYPE html>
@@ -265,7 +272,7 @@ if ($already_reviewed && !$message) {
                     </div>
                 </form>
             <?php endif; ?>
-            
+
         </div>
     </div>
 </div>
