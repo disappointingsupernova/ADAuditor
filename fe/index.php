@@ -1,5 +1,6 @@
 <?php
 require 'config.php';
+require 'logging.php';
 require 'check_auth.php';
 use PHPMailer\PHPMailer\PHPMailer;
 use PHPMailer\PHPMailer\Exception;
@@ -16,7 +17,7 @@ $email = $userInfo['http://schemas.xmlsoap.org/ws/2005/05/identity/claims/emaila
 $displayName = trim("$firstName $lastName");
 
 $message = null;
-$message_class = 'success'; // Default to success
+$message_class = 'success';
 
 function send_smtp_notification($to, $subject, $body) {
     global $config;
@@ -55,6 +56,7 @@ function send_smtp_notification($to, $subject, $body) {
         $mail->send();
     } catch (Exception $e) {
         error_log("Failed to send email: " . $mail->ErrorInfo);
+        log_action($GLOBALS['pdo'], 'Error', 'Email send failure: ' . $mail->ErrorInfo, $GLOBALS['email']);
     }
 }
 
@@ -63,13 +65,7 @@ $show_reviews_table = false;
 $outstandingReviews = [];
 
 if (!$secret) {
-    $stmt = $pdo->prepare("
-        SELECT a.username, a.secret, u.email, CONCAT(u.username, ' (', u.email, ')') AS display_name, a.id, a.audit_date
-        FROM audit_log a
-        LEFT JOIN users u ON a.username = u.username
-        WHERE a.manager_email = ? AND a.date_reviewed IS NULL
-        ORDER BY a.audit_date ASC
-    ");
+    $stmt = $pdo->prepare("SELECT a.username, a.secret, u.email, CONCAT(u.username, ' (', u.email, ')') AS display_name, a.id, a.audit_date FROM audit_log a LEFT JOIN users u ON a.username = u.username WHERE a.manager_email = ? AND a.date_reviewed IS NULL ORDER BY a.audit_date ASC");
     $stmt->execute([$email]);
     $outstandingReviews = $stmt->fetchAll(PDO::FETCH_ASSOC);
 
@@ -77,6 +73,7 @@ if (!$secret) {
         http_response_code(400);
         $message = "You have no outstanding access reviews.";
         $message_class = 'info';
+        log_action($pdo, 'Audit', 'No outstanding reviews', $email);
     } else {
         $message = "Please select a user to review:";
         $message_class = 'none';
@@ -90,10 +87,16 @@ if ($secret) {
     $stmt->execute([$secret]);
     $audit = $stmt->fetch(PDO::FETCH_ASSOC);
 
+    $token_short = substr($secret, 0, 5) . '...' . substr($secret, -5);
+
     if (!$audit) {
         http_response_code(404);
         $message = "Invalid Token - Audit not found.";
         $message_class = 'warning';
+        log_action($pdo, 'Audit', "Tried to open invalid audit token $token_short", $email);
+    } else {
+        $log_msg = "Opened audit token $token_short for {$audit['username']}";
+        log_action($pdo, 'Audit', $log_msg, $email);
     }
 }
 
@@ -101,6 +104,10 @@ if ($audit) {
     $username = htmlspecialchars($audit['username']);
     $manager_email = htmlspecialchars($audit['manager_email']);
     $already_reviewed = !empty($audit['date_reviewed']);
+
+    if ($already_reviewed) {
+        log_action($pdo, 'Audit', "Opened already reviewed audit for $username", $email);
+    }
 
     if (!$already_reviewed && $_SERVER['REQUEST_METHOD'] !== 'POST') {
         $show_form = true;
@@ -115,7 +122,9 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
     $update = $pdo->prepare("UPDATE audit_log SET date_reviewed = ?, changes = ? WHERE id = ?");
     $update->execute([$now, $json, $audit['id']]);
 
-    $body = "The following groups were requested for removal for user {$username}:\n\n" . implode("\n", $groupsToRemove);
+    $body = "The following groups were requested for removal for user {$username}:
+
+" . implode("\n", $groupsToRemove);
     send_smtp_notification("techops@domain.com", "Access Change Request: $username", $body);
 
     $message = "The requested changes for <strong>{$username}</strong> have been sent to the TechOps team for actioning.";
@@ -123,14 +132,9 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
 
     $show_form = false;
 
-    // Refresh outstanding reviews
-    $stmt = $pdo->prepare("
-        SELECT a.username, a.secret, u.email, CONCAT(u.username, ' (', u.email, ')') AS display_name, a.id, a.audit_date
-        FROM audit_log a
-        LEFT JOIN users u ON a.username = u.username
-        WHERE a.manager_email = ? AND a.date_reviewed IS NULL
-        ORDER BY a.audit_date ASC
-    ");
+    log_action($pdo, 'Audit', "Submitted group removal for $username. Groups: $json", $email);
+
+    $stmt = $pdo->prepare("SELECT a.username, a.secret, u.email, CONCAT(u.username, ' (', u.email, ')') AS display_name, a.id, a.audit_date FROM audit_log a LEFT JOIN users u ON a.username = u.username WHERE a.manager_email = ? AND a.date_reviewed IS NULL ORDER BY a.audit_date ASC");
     $stmt->execute([$email]);
     $outstandingReviews = $stmt->fetchAll(PDO::FETCH_ASSOC);
 
@@ -147,6 +151,8 @@ if ($action === 'approve' && isset($audit) && !$already_reviewed) {
     $message = "Existing access for <strong>{$username}</strong> has been approved.";
     $message_class = 'success';
     $show_form = false;
+
+    log_action($pdo, 'Audit', "Access approved for $username", $email);
 }
 
 $groups = [];

@@ -1,4 +1,5 @@
 <?php
+require '../logging.php';
 require_once __DIR__ . '/../vendor/autoload.php';
 
 use OneLogin\Saml2\Auth;
@@ -30,6 +31,8 @@ try {
     // Restore original URL if available
     $redirectUrl = $_SESSION['post_login_redirect'] ?? '/index.php';
     unset($_SESSION['post_login_redirect']);
+    $email = $_SESSION['user_email'];
+    log_action($pdo, 'Login', 'User logged in', $email);
 
     header('Location: ' . $redirectUrl);
     exit;
