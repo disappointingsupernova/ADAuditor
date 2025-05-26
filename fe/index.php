@@ -63,12 +63,13 @@ function send_smtp_notification($to, $subject, $body) {
 $show_form = false;
 $show_reviews_table = false;
 $outstandingReviews = [];
+$has_other_reviews = false;
+
+$stmt = $pdo->prepare("SELECT a.username, a.secret, u.email, CONCAT(u.username, ' (', u.email, ')') AS display_name, a.id, a.audit_date FROM audit_log a LEFT JOIN users u ON a.username = u.username WHERE a.manager_email = ? AND a.date_reviewed IS NULL ORDER BY a.audit_date ASC");
+$stmt->execute([$email]);
+$outstandingReviews = $stmt->fetchAll(PDO::FETCH_ASSOC);
 
 if (!$secret) {
-    $stmt = $pdo->prepare("SELECT a.username, a.secret, u.email, CONCAT(u.username, ' (', u.email, ')') AS display_name, a.id, a.audit_date FROM audit_log a LEFT JOIN users u ON a.username = u.username WHERE a.manager_email = ? AND a.date_reviewed IS NULL ORDER BY a.audit_date ASC");
-    $stmt->execute([$email]);
-    $outstandingReviews = $stmt->fetchAll(PDO::FETCH_ASSOC);
-
     if (empty($outstandingReviews)) {
         http_response_code(400);
         $message = "You have no outstanding access reviews.";
@@ -78,7 +79,6 @@ if (!$secret) {
         $message = "Please select a user to review:";
         $message_class = 'none';
         $show_reviews_table = true;
-        
         log_action($pdo, 'Audit', "Listed " . count($outstandingReviews) . " available reviews", $email);
     }
 }
@@ -100,6 +100,11 @@ if ($secret) {
         $log_msg = "Opened audit token $token_short for {$audit['username']}";
         log_action($pdo, 'Audit', $log_msg, $email);
     }
+}
+
+$has_other_reviews = count($outstandingReviews) > 1;
+if ($secret && $audit) {
+    $has_other_reviews = count(array_filter($outstandingReviews, fn($r) => $r['id'] != $audit['id'])) > 0;
 }
 
 if ($audit) {
@@ -125,8 +130,7 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
     $update->execute([$now, $json, $audit['id']]);
 
     $body = "The following groups were requested for removal for user {$username}:
-
-" . implode("\n", $groupsToRemove);
+\n" . implode("\n", $groupsToRemove);
     send_smtp_notification("techops@sarik.tech", "Access Change Request: $username", $body);
 
     $message = "The requested changes for <strong>{$username}</strong> have been sent to the TechOps team for actioning.";
@@ -139,10 +143,8 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
     $stmt = $pdo->prepare("SELECT a.username, a.secret, u.email, CONCAT(u.username, ' (', u.email, ')') AS display_name, a.id, a.audit_date FROM audit_log a LEFT JOIN users u ON a.username = u.username WHERE a.manager_email = ? AND a.date_reviewed IS NULL ORDER BY a.audit_date ASC");
     $stmt->execute([$email]);
     $outstandingReviews = $stmt->fetchAll(PDO::FETCH_ASSOC);
-
-    if (!empty($outstandingReviews)) {
-        $show_reviews_table = true;
-    }
+    $show_reviews_table = !empty($outstandingReviews);
+    $has_other_reviews = count($outstandingReviews) > 0;
 }
 
 if ($action === 'approve' && isset($audit) && !$already_reviewed) {
@@ -156,14 +158,11 @@ if ($action === 'approve' && isset($audit) && !$already_reviewed) {
 
     log_action($pdo, 'Audit', "Access approved for $username", $email);
 
-    // Fetch updated list of outstanding reviews
     $stmt = $pdo->prepare("SELECT a.username, a.secret, u.email, CONCAT(u.username, ' (', u.email, ')') AS display_name, a.id, a.audit_date FROM audit_log a LEFT JOIN users u ON a.username = u.username WHERE a.manager_email = ? AND a.date_reviewed IS NULL ORDER BY a.audit_date ASC");
     $stmt->execute([$email]);
     $outstandingReviews = $stmt->fetchAll(PDO::FETCH_ASSOC);
-
-    if (!empty($outstandingReviews)) {
-        $show_reviews_table = true;
-    }
+    $show_reviews_table = !empty($outstandingReviews);
+    $has_other_reviews = count($outstandingReviews) > 0;
 }
 
 $groups = [];
@@ -198,8 +197,8 @@ if (isset($already_reviewed) && $already_reviewed && !$message) {
 <body class="bg-light pb-5 pt-0">
 <div class="position-absolute top-0 start-0 w-100 text-white d-flex justify-content-between align-items-center px-4 py-2" style="background: rgba(0, 0, 0, 0.4); z-index: 10;">
     <div>
-        <?php if ($show_reviews_table): ?>
-            <a href="/index.php" class="btn btn-outline-light btn-sm" title="View other reviews">All Reviews</a>
+        <?php if ($secret && $has_other_reviews): ?>
+            <a href="/" class="btn btn-outline-light btn-sm" title="View other reviews">All Reviews</a>
         <?php endif; ?>
     </div>
     <div>
