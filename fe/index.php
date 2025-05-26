@@ -127,7 +127,7 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
     $body = "The following groups were requested for removal for user {$username}:
 
 " . implode("\n", $groupsToRemove);
-    send_smtp_notification("techops@domain.com", "Access Change Request: $username", $body);
+    send_smtp_notification("techops@sarik.tech", "Access Change Request: $username", $body);
 
     $message = "The requested changes for <strong>{$username}</strong> have been sent to the TechOps team for actioning.";
     $message_class = 'success';
@@ -252,7 +252,7 @@ if (isset($already_reviewed) && $already_reviewed && !$message) {
                     </tbody>
                 </table>
             <?php elseif ($show_form): ?>
-                <form method="POST" onsubmit="selectAll();">
+                <form method="POST" onsubmit="return selectAll();">
                     <p><strong>Select any groups you wish to remove from <?= $username ?></strong></p>
                     <div class="row">
                         <div class="col-md-5">
@@ -300,9 +300,19 @@ function moveSelected(fromId, toId) {
 // Select all removal groups before submitting form
 function selectAll() {
     const remove = document.getElementById('remove');
+    const button = document.getElementById('action-button');
+
+    if (remove.options.length === 0) {
+        // Redirect instead of submitting
+        window.location.href = window.location.pathname + window.location.search + '&action=approve';
+        return false; // Cancel form submission
+    }
+
     for (let i = 0; i < remove.options.length; i++) {
         remove.options[i].selected = true;
     }
+
+    return true; // Allow form submission
 }
 
 function updateActionButton() {
