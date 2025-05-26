@@ -101,6 +101,18 @@ if ($audit) {
     $already_reviewed = !empty($audit['date_reviewed']);
 }
 
+$show_form = false;
+$show_reviews_table = false;
+
+if ($audit && !$already_reviewed && $_SERVER['REQUEST_METHOD'] !== 'POST') {
+    $show_form = true;
+}
+
+if (!$secret && !empty($outstandingReviews)) {
+    $show_reviews_table = true;
+}
+
+
 if ($_SERVER['REQUEST_METHOD'] === 'POST') {
     $groupsToRemove = $_POST['remove_groups'] ?? [];
     $json = json_encode($groupsToRemove);
@@ -198,32 +210,33 @@ if ($already_reviewed && !$message) {
             <?php elseif ($message_class === 'none'): ?>
                 <p class="text-center fs-5"><?= $message ?></p>
             <?php endif; ?>
-                <?php if (isset($outstandingReviews) && !empty($outstandingReviews)): ?>
-                    <table class="table table-hover mt-3">
-                        <thead class="table-light">
-                            <tr>
-                                <th scope="col">Username</th>
-                                <th scope="col">Email</th>
-                                <th scope="col">Review Requested</th>
-                                <th scope="col">Action</th>
+
+            <?php if ($show_reviews_table): ?>
+                <table class="table table-hover mt-3">
+                    <thead class="table-light">
+                        <tr>
+                            <th scope="col">Username</th>
+                            <th scope="col">Email</th>
+                            <th scope="col">Review Requested</th>
+                            <th scope="col">Action</th>
+                        </tr>
+                    </thead>
+                    <tbody>
+                        <?php foreach ($outstandingReviews as $review): ?>
+                            <?php
+                                $requestedDate = $review['audit_date'];
+                                $isOverdue = $requestedDate && (strtotime($requestedDate) < strtotime('-30 days'));
+                            ?>
+                            <tr class="<?= $isOverdue ? 'table-danger' : '' ?>">
+                                <td><?= htmlspecialchars($review['username']) ?></td>
+                                <td><?= htmlspecialchars($review['email']) ?></td>
+                                <td><?= htmlspecialchars(date('Y-m-d', strtotime($requestedDate))) ?></td>
+                                <td><a href="?token=<?= urlencode($review['secret']) ?>" class="btn btn-sm btn-outline-primary">Review</a></td>
                             </tr>
-                        </thead>
-                        <tbody>
-                            <?php foreach ($outstandingReviews as $review): ?>
-                                <?php
-                                    $requestedDate = $review['audit_date'];
-                                    $isOverdue = $requestedDate && (strtotime($requestedDate) < strtotime('-30 days'));
-                                ?>
-                                <tr class="<?= $isOverdue ? 'table-danger' : '' ?>">
-                                    <td><?= htmlspecialchars($review['username']) ?></td>
-                                    <td><?= htmlspecialchars($review['email']) ?></td>
-                                    <td><?= htmlspecialchars(date('Y-m-d', strtotime($requestedDate))) ?></td>
-                                    <td><a href="?token=<?= urlencode($review['secret']) ?>" class="btn btn-sm btn-outline-primary">Review</a></td>
-                                </tr>
-                            <?php endforeach; ?>
-                        </tbody>
-                    </table>
-            <?php else: ?>
+                        <?php endforeach; ?>
+                    </tbody>
+                </table>
+            <?php elseif ($show_form): ?>
                 <form method="POST" onsubmit="selectAll();">
                     <p><strong>Select any groups you wish to remove from <?= $username ?></strong></p>
                     <div class="row">
@@ -252,6 +265,7 @@ if ($already_reviewed && !$message) {
                     </div>
                 </form>
             <?php endif; ?>
+            
         </div>
     </div>
 </div>
