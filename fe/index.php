@@ -101,7 +101,7 @@ if ($secret) {
         http_response_code(404);
         $message = "Invalid Token - Audit not found.";
         $message_class = 'warning';
-        log_action($pdo, 'Audit', "Tried to open invalid audit token $token_short", $email);
+        log_action($pdo, 'Audit', "Tried to open invalid audit token $secret", $email);
     } else {
         $log_msg = "Opened audit token $token_short for {$audit['username']}";
         log_action($pdo, 'Audit', $log_msg, $email);
