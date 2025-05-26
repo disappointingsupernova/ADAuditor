@@ -62,7 +62,13 @@ function send_smtp_notification($to, $subject, $body) {
 
 
 if (!$secret) {
-    $stmt = $pdo->prepare("SELECT username, secret FROM audit_log WHERE manager_email = ? AND date_reviewed IS NULL ORDER BY username");
+    $stmt = $pdo->prepare("
+        SELECT a.username, a.secret, u.email, CONCAT(u.username, ' (', u.email, ')') AS display_name, a.id, a.audit_date
+        FROM audit_log a
+        LEFT JOIN users u ON a.username = u.username
+        WHERE a.manager_email = ? AND a.date_reviewed IS NULL
+        ORDER BY a.audit_date ASC
+    ");
     $stmt->execute([$email]);
     $outstandingReviews = $stmt->fetchAll(PDO::FETCH_ASSOC);
 
@@ -72,7 +78,7 @@ if (!$secret) {
         $message_class = 'info';
     } else {
         $message = "Please select a user to review:";
-        $message_class = 'primary';
+        $message_class = 'none';
     }
 }
 
@@ -185,20 +191,38 @@ if ($already_reviewed && !$message) {
             <h4><?php echo $application_name; if ($audit): ?> for <?= $username ?> <?php endif ?></h4>
         </div>
         <div class="card-body">
-            <?php if ($message): ?>
+            <?php if ($message && $message_class !== 'none'): ?>
                 <div class="alert alert-<?= htmlspecialchars($message_class) ?> text-center fs-5">
                     <?= $message ?>
                 </div>
+            <?php elseif ($message_class === 'none'): ?>
+                <p class="text-center fs-5"><?= $message ?></p>
+            <?php endif; ?>
                 <?php if (isset($outstandingReviews) && !empty($outstandingReviews)): ?>
-                    <ul class="list-group list-group-flush mt-3">
-                        <?php foreach ($outstandingReviews as $review): ?>
-                            <li class="list-group-item d-flex justify-content-between align-items-center">
-                                <span><?= htmlspecialchars($review['username']) ?></span>
-                                <a href="?token=<?= urlencode($review['secret']) ?>" class="btn btn-sm btn-outline-primary">Review</a>
-                            </li>
-                        <?php endforeach; ?>
-                    </ul>
-                <?php endif; ?>
+                    <table class="table table-hover mt-3">
+                        <thead class="table-light">
+                            <tr>
+                                <th scope="col">Username</th>
+                                <th scope="col">Email</th>
+                                <th scope="col">Review Requested</th>
+                                <th scope="col">Action</th>
+                            </tr>
+                        </thead>
+                        <tbody>
+                            <?php foreach ($outstandingReviews as $review): ?>
+                                <?php
+                                    $requestedDate = $review['audit_date'];
+                                    $isOverdue = $requestedDate && (strtotime($requestedDate) < strtotime('-30 days'));
+                                ?>
+                                <tr class="<?= $isOverdue ? 'table-danger' : '' ?>">
+                                    <td><?= htmlspecialchars($review['username']) ?></td>
+                                    <td><?= htmlspecialchars($review['email']) ?></td>
+                                    <td><?= htmlspecialchars(date('Y-m-d', strtotime($requestedDate))) ?></td>
+                                    <td><a href="?token=<?= urlencode($review['secret']) ?>" class="btn btn-sm btn-outline-primary">Review</a></td>
+                                </tr>
+                            <?php endforeach; ?>
+                        </tbody>
+                    </table>
             <?php else: ?>
                 <form method="POST" onsubmit="selectAll();">
                     <p><strong>Select any groups you wish to remove from <?= $username ?></strong></p>
