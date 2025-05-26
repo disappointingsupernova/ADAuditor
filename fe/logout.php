@@ -9,8 +9,11 @@ session_start();
 $samlSettings = require __DIR__ . '/saml_settings.php';
 $auth = new Auth($samlSettings);
 
-$email = $_SESSION['user_email'];
-log_action($pdo, 'Login', 'User logged out', $email);
+// Only log if session is present and email is set
+$email = $_SESSION['user_email'] ?? null;
+if ($email) {
+    log_action($pdo, 'Login', 'User logged out', $email);
+}
 
 // Process SAML logout response or request
 if (isset($_GET['SAMLResponse']) || isset($_GET['SAMLRequest'])) {
