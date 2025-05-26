@@ -276,7 +276,7 @@ if (isset($already_reviewed) && $already_reviewed && !$message) {
                     </div>
 
                     <div class="mt-4 text-end">
-                        <button type="submit" class="btn btn-danger">Submit Group Removal Request</button>
+                        <button id="action-button" type="submit" class="btn btn-danger">Submit Group Removal Request</button>
                     </div>
                 </form>
             <?php endif; ?>
@@ -293,6 +293,8 @@ function moveSelected(fromId, toId) {
     selected.forEach(opt => {
         to.add(opt);
     });
+
+    updateActionButton(); 
 }
 
 // Select all removal groups before submitting form
@@ -302,6 +304,28 @@ function selectAll() {
         remove.options[i].selected = true;
     }
 }
+
+function updateActionButton() {
+    const remove = document.getElementById('remove');
+    const button = document.getElementById('action-button');
+
+    if (remove.options.length === 0) {
+        button.textContent = 'Accept Current Groups';
+        button.classList.remove('btn-danger');
+        button.classList.add('btn-success');
+    } else {
+        button.textContent = 'Submit Group Removal Request';
+        button.classList.remove('btn-success');
+        button.classList.add('btn-danger');
+    }
+}
+
+document.getElementById('available').addEventListener('change', updateActionButton);
+document.getElementById('remove').addEventListener('change', updateActionButton);
+
+// Also call it once on page load
+updateActionButton();
+
 </script>
 
 <?php include 'footer.php'; ?>
