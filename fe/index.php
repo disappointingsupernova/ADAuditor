@@ -155,6 +155,15 @@ if ($action === 'approve' && isset($audit) && !$already_reviewed) {
     $show_form = false;
 
     log_action($pdo, 'Audit', "Access approved for $username", $email);
+
+    // Fetch updated list of outstanding reviews
+    $stmt = $pdo->prepare("SELECT a.username, a.secret, u.email, CONCAT(u.username, ' (', u.email, ')') AS display_name, a.id, a.audit_date FROM audit_log a LEFT JOIN users u ON a.username = u.username WHERE a.manager_email = ? AND a.date_reviewed IS NULL ORDER BY a.audit_date ASC");
+    $stmt->execute([$email]);
+    $outstandingReviews = $stmt->fetchAll(PDO::FETCH_ASSOC);
+
+    if (!empty($outstandingReviews)) {
+        $show_reviews_table = true;
+    }
 }
 
 $groups = [];
