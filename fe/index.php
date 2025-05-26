@@ -198,8 +198,9 @@ if (isset($already_reviewed) && $already_reviewed && !$message) {
 <body class="bg-light pb-5 pt-0">
 <div class="position-absolute top-0 start-0 w-100 text-white d-flex justify-content-between align-items-center px-4 py-2" style="background: rgba(0, 0, 0, 0.4); z-index: 10;">
     <div>
-        <strong><?= htmlspecialchars($displayName) ?></strong><br>
-        <small><?= htmlspecialchars($email) ?></small>
+        <?php if ($show_reviews_table): ?>
+            <a href="/index.php" class="btn btn-outline-light btn-sm" title="View other reviews">All Reviews</a>
+        <?php endif; ?>
     </div>
     <div>
         <a href="/logout.php" class="btn btn-outline-light btn-sm">Sign out</a>
