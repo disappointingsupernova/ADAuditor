@@ -1,4 +1,5 @@
 <?php
+// Include configuration, logging, authentication, and dependencies
 require 'config.php';
 require 'logging.php';
 require 'check_auth.php';
@@ -6,11 +7,11 @@ use PHPMailer\PHPMailer\PHPMailer;
 use PHPMailer\PHPMailer\Exception;
 require 'vendor/autoload.php';
 
+// Retrieve GET parameters and SAML user data
 $secret = $_GET['token'] ?? null;
 $action = $_GET['action'] ?? null;
 
 $userInfo = $_SESSION['saml_user_data'] ?? [];
-
 $firstName = $userInfo['http://schemas.xmlsoap.org/ws/2005/05/identity/claims/givenname'][0] ?? '';
 $lastName = $userInfo['http://schemas.xmlsoap.org/ws/2005/05/identity/claims/surname'][0] ?? '';
 $email = $userInfo['http://schemas.xmlsoap.org/ws/2005/05/identity/claims/emailaddress'][0] ?? '';
@@ -19,6 +20,7 @@ $displayName = trim("$firstName $lastName");
 $message = null;
 $message_class = 'success';
 
+// Function to send email notifications
 function send_smtp_notification($to, $subject, $body) {
     global $config;
 
@@ -60,15 +62,18 @@ function send_smtp_notification($to, $subject, $body) {
     }
 }
 
+// Initialisation flags and container variables
 $show_form = false;
 $show_reviews_table = false;
 $outstandingReviews = [];
 $has_other_reviews = false;
 
+// Fetch all outstanding reviews for the current manager
 $stmt = $pdo->prepare("SELECT a.username, a.secret, u.email, CONCAT(u.username, ' (', u.email, ')') AS display_name, a.id, a.audit_date FROM audit_log a LEFT JOIN users u ON a.username = u.username WHERE a.manager_email = ? AND a.date_reviewed IS NULL ORDER BY a.audit_date ASC");
 $stmt->execute([$email]);
 $outstandingReviews = $stmt->fetchAll(PDO::FETCH_ASSOC);
 
+// Display list if no token is provided
 if (!$secret) {
     if (empty($outstandingReviews)) {
         http_response_code(400);
@@ -83,6 +88,7 @@ if (!$secret) {
     }
 }
 
+// If a token is provided, fetch that specific audit
 $audit = null;
 if ($secret) {
     $stmt = $pdo->prepare("SELECT * FROM audit_log WHERE secret = ?");
@@ -102,11 +108,13 @@ if ($secret) {
     }
 }
 
+// Determine if other outstanding reviews exist
 $has_other_reviews = count($outstandingReviews) > 1;
 if ($secret && $audit) {
     $has_other_reviews = count(array_filter($outstandingReviews, fn($r) => $r['id'] != $audit['id'])) > 0;
 }
 
+// Show review form if applicable
 if ($audit) {
     $username = htmlspecialchars($audit['username']);
     $manager_email = htmlspecialchars($audit['manager_email']);
@@ -121,6 +129,7 @@ if ($audit) {
     }
 }
 
+// Handle submitted group removals
 if ($_SERVER['REQUEST_METHOD'] === 'POST') {
     $groupsToRemove = $_POST['remove_groups'] ?? [];
     $json = json_encode($groupsToRemove);
@@ -147,6 +156,7 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
     $has_other_reviews = count($outstandingReviews) > 0;
 }
 
+// Handle simple approval action (no changes submitted)
 if ($action === 'approve' && isset($audit) && !$already_reviewed) {
     $now = date('Y-m-d H:i:s');
     $update = $pdo->prepare("UPDATE audit_log SET date_reviewed = ? WHERE id = ?");
@@ -165,6 +175,7 @@ if ($action === 'approve' && isset($audit) && !$already_reviewed) {
     $has_other_reviews = count($outstandingReviews) > 0;
 }
 
+// Fetch group membership for audit display
 $groups = [];
 if ($audit) {
     $stmt = $pdo->prepare("SELECT group_name FROM user_groups WHERE username = ?");
@@ -172,6 +183,7 @@ if ($audit) {
     $groups = $stmt->fetchAll(PDO::FETCH_COLUMN);
 }
 
+// Show final message if audit already reviewed and no other messages exist
 if (isset($already_reviewed) && $already_reviewed && !$message) {
     $message = "This access review for <strong>{$username}</strong> has already been completed.";
     $message_class = 'info';
